@@ -24,19 +24,26 @@ export interface Setup {
 
 /** The whole configuration of a run, in the order the decisions are made.
  *
- * Three bands, numbered, and the order is the argument:
+ * Three bands, and the order is the argument:
  *
- *   1-3  model, language, test type — identical for both tests, and each one
- *        narrows what follows. The engine decides who is eligible to judge it;
- *        the language decides whether a dialect test is answerable at all.
- *   4    the instrument, which is the half that *differs* by test type and so
- *        belongs below the choice that selects it, not beside it.
- *   5    mode, then start. Last because it is the only decision that is purely
- *        about how you want to watch; changing it changes nothing measured.
+ *   model, language, test   identical for both tests, and each narrows what
+ *                           follows. The engine decides who is eligible to
+ *                           judge it; the language decides whether a dialect
+ *                           test is answerable at all.
+ *   the instrument          the half that *differs* by test type, so it belongs
+ *                           below the choice that selects it, not beside it.
+ *   mode, then start        last, because mode is the only decision here that
+ *                           changes nothing measured.
  *
- * The previous version put mode and start in the middle of band 1 and hid the
- * instrument behind a "Why these?" disclosure, so the bar read as a row of
- * unrelated controls rather than a sequence.
+ * Reading order carries that on its own; the bands were numbered for a while
+ * and the numerals were furniture to look past rather than read.
+ *
+ * **Every control is the same control.** Reader, fallback and judge are three
+ * identical selects, because they are three answers to the same kind of
+ * question. An earlier version drew the readers as a bespoke reorderable chain
+ * -- it was accurate about `route()` and looked like nothing else on the page,
+ * which is a bad trade: the ordering it exposed is fully expressed by "reader"
+ * and "fallback", and those are words everybody already has.
  *
  * **The instrument stays visible.** A verdict is only comparable to another
  * measured through the same judge and the same reader; both are stored on every
@@ -66,7 +73,13 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   const [proposal, setProposal] = useState<Proposal | null>(null);
 
   const [judge, setJudge] = useState("");
-  const [readers, setReaders] = useState<string[]>([]);
+  // Two named slots rather than a list. `route()` still takes an ordered panel
+  // and stops at the first that qualifies, so the wire format is unchanged —
+  // but "reader, and one to fall back to" is the whole of what anyone needs to
+  // say, and a bespoke reorderable chain said it in a shape nothing else on
+  // this page uses.
+  const [reader, setReader] = useState("");
+  const [fallback, setFallback] = useState("");
   const [attestors, setAttestors] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
   const [varieties, setVarieties] = useState<string[]>([]);
@@ -86,7 +99,8 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       // own family, and must not silently undo a deliberate pick.
       if (r.propose && !touched) {
         setJudge(r.propose.judge ?? "");
-        setReaders(r.propose.backtranslator_panel);
+        setReader(r.propose.backtranslator_panel[0] ?? "");
+        setFallback(r.propose.backtranslator_panel[1] ?? "");
         // Deliberately not proposed. A reader is one or two calls; a control
         // panel is five per model, and a pre-ticked panel is a spend nobody
         // chose.
@@ -127,7 +141,7 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   const missing =
     !engine ? "Pick a model to test."
     : !tag ? "Pick a language."
-    : test === "capability" && !readers.length ? "Pick at least one reader."
+    : test === "capability" && !reader ? "Pick a reader."
     : test === "capability" && !judge ? "Pick a judge."
     : test === "dialect" && varieties.filter((v) => v !== tag).length !== 1
       ? "Pick one variety to contrast it against."
@@ -141,7 +155,10 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
     test_type: test, tag, engine, mode,
     // A dialect battery has no judge: its instrument is the control panel.
     judge_model: test === "capability" ? judge : undefined,
-    backtranslator_panel: test === "capability" ? readers : undefined,
+    // Order is the meaning: the fallback is only reached if the reader cannot
+    // be qualified for the language.
+    backtranslator_panel: test === "capability"
+      ? [reader, fallback].filter(Boolean) : undefined,
     attestors: test === "dialect" ? attestors : undefined,
     varieties: test === "dialect" ? varieties : undefined,
     neutral_tag: test === "dialect" ? detail?.umbrella ?? undefined : undefined,
@@ -189,13 +206,13 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
     <div className="border-b border-line bg-panel">
       {/* 1-3: the same for both tests, and each narrows what follows. */}
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3 px-4 py-2.5">
-        <Field step={1} label="Model under test"
+        <Field label="Model under test"
                info="Every later choice is made relative to this one: a model never reads back or grades its own family's output, because that measures self-consistency and reports it as agreement.">
           <ModelPick models={models} value={engine} locked={!!locked}
                      onChange={(v) => { setTouched(false); setEngine(v); }} />
         </Field>
 
-        <Field step={2} label="Language"
+        <Field label="Language"
                info={test === "dialect"
                  ? "Only tags a dialect test can answer: a named variety with at least one named sibling to contrast it against."
                  : "Any tag in the loaded locale list. A language with no control text can still be gated — inability is provable without a reader — but its quality cannot be scored."}>
@@ -214,7 +231,7 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
           />
         </Field>
 
-        <Field step={3} label="Test"
+        <Field label="Test"
                info={<>
                  <b>Language capability</b> asks whether the model can write the
                  language at all: generate, gate, back-translate, judge the facts.
@@ -231,45 +248,49 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
 
       {/* 4: the half that differs by test type, below the choice that selects it. */}
       <div className="flex items-start gap-3 border-t border-line-soft px-4 py-2">
-        <StepLabel step={4} label={test === "capability" ? "Instrument" : "Dialect setup"}
-                   info={instrumentHelp} wide />
+        <GroupLabel label={test === "capability" ? "Instrument" : "Dialect setup"}
+                    info={instrumentHelp} wide />
 
         <div className="grid min-w-0 flex-1 grid-cols-[6rem_minmax(0,1fr)]
                         items-center gap-x-3 gap-y-1.5 text-[12px]">
           {test === "capability" ? (
             <>
-              <Row label="reader chain"
+              <Row label="reader"
                    info={<>
-                     <b>Exactly one reader is used.</b> They are tried in this
-                     order and the <i>first that qualifies for this language</i>
-                     is the one that reads it back — the rest are fallbacks that
-                     cost nothing unless an earlier one fails. Only the winner is
-                     recorded on the verdict.
+                     Translates the model's output back into the pivot language
+                     so the judge can grade it without reading the target
+                     language.
                      <br /><br />
-                     A chain and not a set because no single model reads every
-                     language: one fabricates Chuvash, another reads it
-                     correctly. First to qualify, not best-scoring — the
-                     qualification number separates fabrication from faithful
-                     reading and is simply wrong in the middle.
+                     Qualified before it is trusted: it is scored against text
+                     whose meaning is already known, because a model that cannot
+                     read a language does not refuse — it invents. One handed
+                     known Chuvash returned “A man is walking. He is wearing a
+                     white shirt.”
                    </>}>
-                <Chain items={readers} locked={!!locked}
-                       onPromote={(i) => choose(() => setReaders(move(readers, i, i - 1)))}
-                       onRemove={(i) => choose(() => setReaders(
-                         readers.filter((_, j) => j !== i)))} />
-                {!locked && eligible.some((m) => !readers.includes(m.id)) && (
-                  <select
-                    className="field ml-1 w-auto border-dashed py-0.5 text-[11px]
-                               text-ink-faint"
-                    value=""
-                    onChange={(e) => { if (e.target.value)
-                      choose(() => setReaders([...readers, e.target.value])); }}
-                  >
-                    <option value="">+ fallback…</option>
-                    {eligible.filter((m) => !readers.includes(m.id)).map((m) => (
-                      <option key={m.id} value={m.id}>{m.id}</option>
-                    ))}
-                  </select>
-                )}
+                <Pick models={eligible} binding={binding} value={reader}
+                      locked={!!locked}
+                      onChange={(v) => choose(() => {
+                        if (v === fallback) setFallback("");
+                        setReader(v);
+                      })} />
+              </Row>
+
+              <Row label="fallback"
+                   info={<>
+                     Tried only if the reader above cannot be qualified for this
+                     language, and it costs nothing otherwise. Worth setting
+                     because qualification is per <i>language</i>, not per model:
+                     no single model reads every language, and one that
+                     fabricates Chuvash reads German perfectly well.
+                     <br /><br />
+                     Exactly one reader ends up used, and only that one is
+                     recorded on the verdict. With no fallback, a reader that
+                     cannot be qualified means the result is `unverified`.
+                   </>}>
+                <Pick models={eligible.filter((m) => m.id !== reader)}
+                      binding={binding} value={fallback} locked={!!locked}
+                      none="none — unverified if the reader fails"
+                      onChange={(v) => choose(() => setFallback(v))} />
               </Row>
 
               <Row label="judge"
@@ -277,10 +298,9 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                 <Pick models={eligible} binding={binding} value={judge}
                       locked={!!locked}
                       onChange={(v) => choose(() => setJudge(v))} />
-                {judge && readers.includes(judge) && (
+                {judge && (judge === reader || judge === fallback) && (
                   <span className="ml-1 text-[11px] text-warn">
-                    also in the reader chain — it would be grading its own
-                    translation
+                    also a reader — it would be grading its own translation
                   </span>
                 )}
               </Row>
@@ -347,7 +367,7 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       {/* 5: how to watch it, and go. Nothing here changes what is measured. */}
       <div className="flex flex-wrap items-end gap-x-6 gap-y-2 border-t
                       border-line-soft px-4 py-2.5">
-        <Field step={5} label="Mode"
+        <Field label="Mode"
                info={<>
                  <b>Manual</b> stops before every paid call so you can read the
                  prompt and change it. <b>Auto</b> runs the same steps straight
@@ -391,31 +411,28 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   );
 }
 
-/** A numbered step label. The number is the whole point: it says these are a
- *  sequence and not a row of unrelated controls. */
-function StepLabel({ step, label, info, wide }: {
-  step: number; label: string; info?: React.ReactNode; wide?: boolean;
+/** A group heading. No number on it: the bands already run left to right and
+ *  top to bottom, which is how anyone reads them, and a numeral per control is
+ *  furniture that has to be looked past rather than read. */
+function GroupLabel({ label, info, wide }: {
+  label: string; info?: React.ReactNode; wide?: boolean;
 }) {
   return (
-    <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap pt-0.5">
-      <span className="grid size-4 place-items-center rounded-full bg-line-soft
-                       text-[9px] font-bold tabular-nums text-ink-faint">
-        {step}
-      </span>
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-        {label}
-      </span>
+    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap pt-0.5
+                     text-[11px] font-semibold uppercase tracking-wider
+                     text-ink-faint">
+      {label}
       {info && <Info wide={wide}>{info}</Info>}
     </span>
   );
 }
 
-function Field({ step, label, info, children }: {
-  step: number; label: string; info?: React.ReactNode; children: React.ReactNode;
+function Field({ label, info, children }: {
+  label: string; info?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1"><StepLabel step={step} label={label} info={info} /></div>
+      <div className="mb-1"><GroupLabel label={label} info={info} /></div>
       {children}
     </div>
   );
@@ -437,59 +454,6 @@ function Row({ label, info, children }: {
   );
 }
 
-/** The reader chain, in the order it will actually be tried.
- *
- * Numbered, because the order is the whole of the meaning: `route()` takes the
- * first member that qualifies for the language and stops, so #1 is the reader
- * you will almost always get and the rest are insurance. Drawn as a chain
- * rather than a row of equal chips, which read as "several readers will be
- * used". Exactly one ever is. */
-function Chain({ items, onPromote, onRemove, locked }: {
-  items: string[]; onPromote: (i: number) => void; onRemove: (i: number) => void;
-  locked?: boolean;
-}) {
-  if (!items.length) {
-    return <span className="text-[11px] text-warn">none chosen</span>;
-  }
-  return (
-    <>
-      {items.map((id, i) => (
-        <span key={id} className="flex items-center">
-          {i > 0 && <span className="px-1 text-ink-faint" aria-hidden>→</span>}
-          <span className={`inline-flex items-center gap-1 rounded-full border
-                            py-0.5 pl-1.5 pr-1 font-mono text-[11px] ${
-            i === 0 ? "border-accent bg-accent-soft text-accent"
-                    : "border-line text-ink-soft"}`}>
-            <span className="tabular-nums opacity-60">{i + 1}</span>
-            {id}
-            {!locked && i > 0 && (
-              <button onClick={() => onPromote(i)} title="Try this one first"
-                      className="px-0.5 opacity-50 hover:opacity-100">↑</button>
-            )}
-            {!locked && (
-              <button onClick={() => onRemove(i)} title="Remove from the chain"
-                      className="px-0.5 opacity-50 hover:opacity-100">×</button>
-            )}
-          </span>
-        </span>
-      ))}
-      <span className="ml-1 text-[11px] text-ink-faint">
-        {items.length === 1
-          ? "no fallback — an unqualified reader means `unverified`"
-          : "#1 is used unless it fails to qualify"}
-      </span>
-    </>
-  );
-}
-
-function move<T>(xs: T[], from: number, to: number): T[] {
-  if (to < 0 || to >= xs.length) return xs;
-  const out = [...xs];
-  const [x] = out.splice(from, 1);
-  out.splice(to, 0, x);
-  return out;
-}
-
 function Toggle({ on, label, onClick, dim }: {
   on: boolean; label: string; onClick: () => void; dim?: boolean;
 }) {
@@ -505,19 +469,22 @@ function Toggle({ on, label, onClick, dim }: {
   );
 }
 
-function Pick({ models, binding, value, onChange, locked }: {
+function Pick({ models, binding, value, onChange, locked, none }: {
   models: ModelRow[]; binding: boolean; value: string;
   onChange: (v: string) => void; locked?: boolean;
+  /** Label for the empty option where empty is a real answer, as it is for a
+   *  fallback. Absent means the field is required and reads "choose…". */
+  none?: string;
 }) {
   if (!models.length && !binding) {
-    return <input className="field max-w-56 font-mono text-[12px]" value={value}
+    return <input className="field w-64 font-mono text-[12px]" value={value}
                   disabled={locked} placeholder="model id"
                   onChange={(e) => onChange(e.target.value)} />;
   }
   return (
-    <select className="field max-w-56 font-mono text-[12px]" value={value}
+    <select className="field w-64 font-mono text-[12px]" value={value}
             disabled={locked} onChange={(e) => onChange(e.target.value)}>
-      <option value="">choose…</option>
+      <option value="">{none ?? "choose…"}</option>
       {!models.some((m) => m.id === value) && value &&
         <option value={value}>{value}</option>}
       {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
