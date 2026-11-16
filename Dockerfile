@@ -34,7 +34,14 @@ COPY backend/polyglot backend/polyglot
 # somewhere inside site-packages and the schemes, markers and specs would all
 # be looked for in the wrong place — silently, since a missing control file
 # reads as "this language cannot be verified" rather than as a broken install.
-RUN pip install -e ./backend
+# The `lid` extra is not optional in here, whatever pyproject calls it.
+# Without fasttext the gate checks the writing system and not the language --
+# a model answering in Indonesian when asked for Acehnese passes -- and it does
+# that silently. An image that can never identify a language, serving a page
+# that offers to measure them, is the exact failure this project keeps warning
+# about: when the instrument is missing, say so rather than quietly answering
+# worse. On the host it stays an extra, because browsing results needs none of it.
+RUN pip install -e "./backend[lid]"
 
 # Authored assets: the instrument, version-controlled alongside the code.
 COPY schemes schemes
