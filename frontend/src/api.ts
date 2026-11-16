@@ -40,10 +40,32 @@ export interface AssetRow {
   licence: string; degraded: string;
 }
 
+export interface Proposal {
+  judge: string | null;
+  backtranslator_panel: string[];
+  attestors: string[];
+  rule: string;
+  excluded_by_family_guard: string[];
+}
+
+export interface ModelsResponse {
+  models: ModelRow[];
+  enumerable: boolean;
+  /** Whether the list is the whole of what can be reached, or a gateway's
+   *  opinion about it. A custom file is binding — a name absent from it has no
+   *  endpoint — and a gateway's list is advisory, so the page keeps a free-text
+   *  field in that case. */
+  binding: boolean;
+  source: string;
+  propose: Proposal | null;
+  pivot: string;
+}
+
 export const api = {
   config: () => req<Config>("/config"),
 
-  models: () => req<{ models: ModelRow[]; enumerable: boolean; defaults: any }>("/models"),
+  models: (engine?: string) => req<ModelsResponse>(
+    `/models${engine ? `?engine=${encodeURIComponent(engine)}` : ""}`),
 
   languages: (q: string, opts: { dialectsOnly?: boolean; limit?: number } = {}) => {
     const p = new URLSearchParams({ q, limit: String(opts.limit ?? 60) });

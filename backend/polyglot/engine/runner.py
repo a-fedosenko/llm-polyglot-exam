@@ -160,11 +160,31 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
     corpus = Corpus(to_db=True, run_id=run_id)
 
     pivot = pivot or settings.pivot
-    judge_model = judge_model or settings.judge_model
 
     if test_type == "capability":
+        # No fallback. The judge and the reader are part of what a verdict
+        # *means* — two runs graded by different judges are not two
+        # measurements of the same thing — so a run that silently inherited
+        # them from an env file would produce a row that is not comparable to
+        # anything and does not say so.
+        #
+        # A dialect battery has no judge at all: its instrument is the panel of
+        # control models, qualified by the manufactured controls on every run.
+        if not judge_model:
+            raise RunError(
+                "No judge was chosen. A verdict is only comparable to another "
+                "graded by the same judge, so it is picked per run rather than "
+                "configured — see GET /api/models for what this installation "
+                "can reach, and the pair it proposes.")
         chosen_specs, edited_specs = specs_for(specs)
-        panel = backtranslator_panel or list(settings.backtranslator_panel)
+        panel = list(backtranslator_panel or [])
+        if not panel:
+            raise RunError(
+                "No reader panel was chosen. Results from different "
+                "back-translators are not comparable — the same engine read by "
+                "two qualified readers disagreed on tier for 13% of 136 "
+                "languages — so the reader is picked per run rather than "
+                "configured.")
         # A model that is both under test and in the reader panel would be
         # dropped from its own panel and then measured through a different
         # instrument from every other engine, which invalidates the comparison.
@@ -252,18 +272,10 @@ def _default_attestors(engine: str) -> list[str]:
     about who knows the dialect, and that guess is exactly what the controls
     exist to replace.
     """
-    from polyglot.core.client import custom_models
-    from polyglot.core.families import model_family
+    from polyglot.core import discovery
 
-    try:
-        ids = [e.model_id for e in custom_models()]
-    except Exception:  # noqa: BLE001 — a broken list is the caller's problem
-        ids = []
-    if not ids:
-        ids = list(dict.fromkeys([settings.judge_model,
-                                  *settings.backtranslator_panel]))
-    fam = model_family(engine)
-    return [m for m in ids if model_family(m) != fam and m != engine]
+    models, _binding = discovery.available()
+    return discovery.propose(engine, models)["attestors"]
 
 
 # -- driving it ----------------------------------------------------------------

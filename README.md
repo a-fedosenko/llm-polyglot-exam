@@ -147,6 +147,19 @@ Approval is a separate gesture from measurement on purpose. A scan that skipped 
 
 **Nothing is ever destroyed.** A re-run adds a row and clears the old one's `current` flag; promotion is a reversible pointer move. There is deliberately no confirmation dialog on it — a password on an overwrite still overwrites, and nothing here is destroyed for it to protect.
 
+## The instrument is a per-run choice, not configuration
+
+A verdict is only comparable to another measured through **the same judge, the same reader and the same method version**. All three are columns on every stored row, and it is not a formality: the same engine read by two qualified readers disagreed on tier for 13% of 136 languages.
+
+So the judge and the reader panel are not in `.env`. They are picked per run, from the models this installation can actually reach, and they sit on the setup bar rather than behind a disclosure — because a choice made once in a file months ago is a choice nobody remembers making.
+
+`GET /api/models` enumerates what is reachable and proposes a starting pair:
+
+- **With a custom model list**, the list is *binding* — a name absent from it has no endpoint and no key, so a run naming one is refused before anything is spent.
+- **With a gateway**, the list comes from `GET {base}/models` and is *advisory* — it is the gateway's opinion, a missing name is still worth trying, and an unreachable gateway degrades the picker to a free-text field rather than breaking the page.
+
+The proposal is deterministic and dull on purpose — models outside the engine's own family, spread across families so the judge and the reader are not two members of one house. It is **not a recommendation**: which model reads a language well is precisely what this tool measures, and nothing at setup time knows it. The one rule it does enforce is the one that matters — a model never grades or reads back its own family's output, because that measures self-consistency and reports it as agreement.
+
 ## What a result does not mean
 
 - **Three items per language**, six more only when the interval straddles the tier cut. Results carry confidence intervals and a borderline one is reported as borderline, never rounded.

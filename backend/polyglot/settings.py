@@ -41,14 +41,31 @@ class Settings(BaseSettings):
     #: file wins where both are configured.
     aggregator_base_url: str | None = None
     aggregator_admin_api_key: str | None = None
+
+    #: Where to ask a gateway what models it serves, when it does not answer
+    #: the standard `GET {base_url}/models`. Only a hint about *discovery* —
+    #: which models to use is never configured here.
     aggregator_model_list_url: str | None = None
 
-    #: Defaults the UI pre-selects. Every one of them is overridable per run
-    #: from the page, which is the point of the page.
-    judge_model: str = "openai-gpt-4o-mini"
-    backtranslator_panel: list[str] = ["gemini-gemini-3-6-flash",
-                                       "deepseek-deepseek-v4-flash"]
+    #: The language everything is back-translated into, so the judge never has
+    #: to read the target language. Installation-level because it is a property
+    #: of who is operating the tool, not of a measurement: a language that *is*
+    #: the pivot is automatically measured through a fallback.
     pivot: str = "en"
+
+    # **The judge and the reader panel are deliberately not here.**
+    #
+    # They were, and that was wrong. A verdict is only comparable to another
+    # measured through the same judge and the same reader — the tool stores both
+    # on every row and refuses to compare across them — so they are the most
+    # identity-defining part of a measurement there is. Setting them once in an
+    # env file and never seeing them again is how a run comes to be graded by
+    # something nobody remembers choosing.
+    #
+    # They are chosen per run, from the models the configuration can actually
+    # reach, and they are shown on screen while the run is set up rather than
+    # hidden behind a panel. `GET /api/models` proposes a starting pair and says
+    # what rule produced it; nothing is defaulted silently.
 
     database_url: str | None = None
     api_bind: str = "127.0.0.1"

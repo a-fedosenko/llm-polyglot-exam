@@ -29,8 +29,8 @@ from pydantic import BaseModel, Field
 
 from polyglot import paths
 from polyglot.core import bootstrap, hardware
-from polyglot.core.client import (NOT_CONFIGURED_MESSAGE, custom_models,
-                                  is_configured)
+from polyglot.core import discovery
+from polyglot.core.client import NOT_CONFIGURED_MESSAGE, is_configured
 from polyglot.core.probe import lid
 from polyglot.core.probe.specs import load_specs
 from polyglot.core.scheme import load_scheme
@@ -98,25 +98,27 @@ def config() -> dict:
 
 
 @app.get("/api/models")
-def models() -> dict:
+def models(engine: str = "") -> dict:
     """Every model this installation can reach.
 
     An aggregator accepts any id and cannot be enumerated, so the list is empty
     there and the page falls back to free text — which is honest about which
     configuration is in use rather than pretending to a closed list.
     """
-    try:
-        entries = custom_models()
-    except Exception as e:  # noqa: BLE001
-        raise _fail(e) from e
+    models, binding = discovery.available()
     return {
-        "models": [{"id": e.model_id, "title": e.title,
-                    "endpoint": e.v1_endpoint.split("//")[-1].split("/")[0]}
-                   for e in entries],
-        "enumerable": bool(entries),
-        "defaults": {"judge": settings.judge_model,
-                     "backtranslator_panel": list(settings.backtranslator_panel),
-                     "pivot": settings.pivot},
+        "models": [{"id": m.id, "title": m.title, "endpoint": m.endpoint,
+                    "family": m.family} for m in models],
+        "enumerable": bool(models),
+        # Whether the list is the whole of what can be reached. A custom file is
+        # the configuration itself and a name absent from it is refused; a
+        # gateway's list is the gateway's opinion and a missing name is still
+        # worth trying, so the page keeps a free-text field in that case.
+        "binding": binding,
+        "source": ("custom model list" if binding
+                   else "gateway" if models else "nothing configured"),
+        "propose": (discovery.propose(engine, models) if engine else None),
+        "pivot": settings.pivot,
     }
 
 

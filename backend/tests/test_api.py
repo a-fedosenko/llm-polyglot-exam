@@ -155,3 +155,58 @@ def test_rerunning_a_step_keeps_the_earlier_attempt(client):
         rows = list(s.scalars(select(RunStep).where(RunStep.run_id == run["id"])))
     assert any(r.superseded for r in rows), \
         "the replaced attempt must survive as evidence, not be overwritten"
+
+
+def test_a_capability_run_refuses_to_inherit_an_instrument(client):
+    """The judge and the reader are per-run choices, not configuration.
+
+    They used to come from the env file, and that was wrong: a verdict is only
+    comparable to another graded by the same judge and read by the same reader,
+    so the most identity-defining part of a measurement would have been set once
+    and never seen again.
+    """
+    r = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
+                                       "engine": "acme-a"})
+    assert r.status_code == 400
+    assert "No judge was chosen" in r.json()["detail"]
+
+    r = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
+                                       "engine": "acme-a", "judge_model": "other-c"})
+    assert r.status_code == 400
+    assert "No reader panel was chosen" in r.json()["detail"]
+
+
+def test_a_dialect_run_needs_no_judge(client):
+    """Its instrument is the panel, qualified by controls on every run."""
+    r = client.post("/api/runs", json={
+        "test_type": "dialect", "tag": "pt-br", "engine": "acme-a",
+        "varieties": ["pt-br", "pt-pt"], "attestors": ["other-b", "other-c"]})
+    assert r.status_code == 201, r.text
+
+
+def test_models_proposes_an_instrument_and_never_one_from_the_engines_family(client,
+                                                                             monkeypatch):
+    from polyglot.core import discovery
+
+    monkeypatch.setattr(discovery, "available", lambda: ([
+        discovery.Model("acme-one"), discovery.Model("acme-two"),
+        discovery.Model("bravo-one"), discovery.Model("cedar-one"),
+    ], True))
+
+    body = client.get("/api/models", params={"engine": "acme-one"}).json()
+    p = body["propose"]
+    assert p["judge"] == "bravo-one"
+    # A third family for the reader where one exists: the judge and the reader
+    # failing the same way at the same time would read as agreement.
+    assert p["backtranslator_panel"][0] == "cedar-one"
+    assert "acme-two" in p["excluded_by_family_guard"], \
+        "the guard drops the whole family, not just the id"
+    assert "acme-two" not in p["attestors"]
+    assert body["binding"] is True
+
+
+def test_an_embedding_model_is_not_offered_as_an_instrument():
+    from polyglot.core.discovery import _is_chat
+
+    assert _is_chat("openai-gpt-4o")
+    assert not _is_chat("openai-text-embedding-3-small")

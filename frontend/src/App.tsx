@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Config } from "./api";
-import type { Call, ModelRow, RunSnapshot } from "./types";
+import type { Call, RunSnapshot } from "./types";
 import { PromptEditor } from "./components/PromptEditor";
 import { SetupBar, type Setup } from "./components/SetupBar";
 import { Stage } from "./components/Stage";
@@ -10,11 +10,6 @@ import { Empty, Info } from "./components/ui";
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
-  const [models, setModels] = useState<ModelRow[]>([]);
-  const [enumerable, setEnumerable] = useState(false);
-  const [defaults, setDefaults] = useState({
-    judge: "", backtranslator_panel: [] as string[], pivot: "en" });
-
   const [run, setRun] = useState<RunSnapshot | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,9 +19,6 @@ export default function App() {
 
   useEffect(() => {
     api.config().then(setConfig).catch((e) => setError(e.message));
-    api.models().then((r) => {
-      setModels(r.models); setEnumerable(r.enumerable); setDefaults(r.defaults);
-    }).catch((e) => setError(e.message));
   }, []);
 
   // The selected step follows the run forward, but only while the reader has
@@ -151,8 +143,7 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TopBar config={config} run={run} />
 
-      <SetupBar models={models} enumerable={enumerable} defaults={defaults}
-                onStart={start} busy={busy} disabled={blocked} />
+      <SetupBar onStart={start} busy={busy} disabled={blocked} />
 
       {config && !config.models_configured && (
         <Banner tone="bad" title="No model endpoint is configured">

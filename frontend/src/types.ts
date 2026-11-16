@@ -126,6 +126,7 @@ export interface ModelRow {
   id: string;
   title: string;
   endpoint: string;
+  family: string;
 }
 
 export interface VerdictRow {

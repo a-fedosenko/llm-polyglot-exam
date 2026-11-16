@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { useEffect, useState } from "react";
+import { api, type Proposal } from "../api";
 import type { LanguageRow, ModelRow, TestType } from "../types";
 import { Badge, Combo, Info } from "./ui";
 
@@ -18,14 +18,20 @@ export interface Setup {
 
 /** The whole configuration of a run, in one bar.
  *
+ * Two things are deliberate about what is visible here.
+ *
  * The previous page served two different probes through one form and
  * distinguished their fields by hiding some of them — seven controls either
  * way, in a grid that reflowed. Here the test type is the first choice and it
- * changes what the bar *is*, rather than which half of it is invisible. */
-export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled }: {
-  models: ModelRow[];
-  enumerable: boolean;
-  defaults: { judge: string; backtranslator_panel: string[]; pivot: string };
+ * changes what the bar *is*, rather than which half of it is invisible.
+ *
+ * And **the instrument is on the bar, not behind a disclosure**. A verdict is
+ * only comparable to another measured through the same judge and the same
+ * reader; the tool stores both on every row and refuses to compare across them.
+ * They used to be set once in an env file and never seen again, which is how a
+ * run comes to be graded by something nobody remembers choosing. They are a
+ * per-run choice now, proposed rather than defaulted, and always on screen. */
+export function SetupBar({ onStart, busy, disabled }: {
   onStart: (s: Setup) => void;
   busy: boolean;
   disabled?: string | null;
@@ -39,13 +45,38 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
   const [detail, setDetail] = useState<any>(null);
   const [open, setOpen] = useState(false);
 
-  const [judge, setJudge] = useState(defaults.judge);
-  const [readers, setReaders] = useState<string[]>(defaults.backtranslator_panel);
+  const [models, setModels] = useState<ModelRow[]>([]);
+  const [binding, setBinding] = useState(false);
+  const [source, setSource] = useState("");
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+
+  const [judge, setJudge] = useState("");
+  const [readers, setReaders] = useState<string[]>([]);
   const [attestors, setAttestors] = useState<string[]>([]);
+  const [touched, setTouched] = useState(false);
   const [varieties, setVarieties] = useState<string[]>([]);
 
-  useEffect(() => { if (!engine && models.length) setEngine(models[0].id); },
-    [models, engine]);
+  // The model list, and a proposed instrument for whichever engine is selected.
+  useEffect(() => {
+    let live = true;
+    api.models(engine || undefined).then((r) => {
+      if (!live) return;
+      setModels(r.models);
+      setBinding(r.binding);
+      setSource(r.source);
+      setProposal(r.propose);
+      if (!engine && r.models.length) setEngine(r.models[0].id);
+      // A proposal replaces an untouched instrument and never overwrites a
+      // chosen one: changing the engine should move the panel off the engine's
+      // own family, and must not silently undo a deliberate pick.
+      if (r.propose && !touched) {
+        setJudge(r.propose.judge ?? "");
+        setReaders(r.propose.backtranslator_panel);
+        setAttestors([]);
+      }
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [engine]);
 
   useEffect(() => {
     let live = true;
@@ -70,17 +101,28 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
 
   const known = detail?.known?.[test];
   const family = (detail?.family ?? []).filter((f: any) => !f.inclusive);
-  const ready = Boolean(engine && tag &&
-    (test === "capability" || varieties.length === 2));
+  const eligible = models.filter((m) => !proposal?.excluded_by_family_guard
+    .includes(m.id));
+
+  const missing =
+    !engine ? "Pick a model to test."
+    : !tag ? "Pick a language."
+    : test === "capability" && !judge ? "Pick a judge — a verdict is only comparable to one graded by the same judge."
+    : test === "capability" && !readers.length ? "Pick at least one reader."
+    : test === "dialect" && varieties.length !== 2 ? "Pick exactly two varieties to contrast."
+    : null;
 
   const start = () => onStart({
     test_type: test, tag, engine, mode,
-    judge_model: judge || undefined,
+    // A dialect battery has no judge: its instrument is the control panel.
+    judge_model: test === "capability" ? judge : undefined,
     backtranslator_panel: test === "capability" ? readers : undefined,
     attestors: test === "dialect" && attestors.length ? attestors : undefined,
     varieties: test === "dialect" ? varieties : undefined,
     neutral_tag: test === "dialect" ? detail?.umbrella ?? undefined : undefined,
   });
+
+  const choose = (fn: () => void) => { setTouched(true); fn(); };
 
   return (
     <div className="border-b border-line bg-panel">
@@ -105,7 +147,7 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
             value={tag ? `${tag} — ${detail?.language?.name ?? ""}` : ""}
             query={query} onQuery={setQuery}
             placeholder={test === "dialect"
-              ? "a variety with a named sibling…" : "search 602 locales…"}
+              ? "a variety with a named sibling…" : "search locales…"}
             items={langs} keyOf={(l) => l.tag} onPick={(l) => setTag(l.tag)}
             hint={test === "dialect"
               ? "Only tags a dialect test can answer: a named variety with at least one named sibling to contrast it against."
@@ -120,17 +162,11 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
           />
         </div>
 
-        <div className="min-w-48">
-          <label className="label">Model under test</label>
-          {enumerable ? (
-            <select className="field" value={engine} onChange={(e) => setEngine(e.target.value)}>
-              {models.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}
-            </select>
-          ) : (
-            <input className="field" value={engine} placeholder="model id"
-                   onChange={(e) => setEngine(e.target.value)} />
-          )}
-        </div>
+        <ModelPick label="Model under test" models={models}
+                   value={engine} onChange={(v) => { setTouched(false); setEngine(v); }}
+                   info={<>Every other choice is made relative to this one: a model
+                     never reads back or grades its own family's output, because
+                     that measures self-consistency and reports it as agreement.</>} />
 
         <Segment value={mode} onChange={(v) => setMode(v as any)} label="Mode"
                  info={<>
@@ -140,20 +176,119 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
                  </>}
                  options={[["manual", "Manual"], ["auto", "Auto"]]} />
 
-        <button className="btn" onClick={() => setOpen(!open)}>
-          Instrument {open ? "▴" : "▾"}
-        </button>
-
-        <button className="btn btn-primary" disabled={!ready || busy || !!disabled}
-                onClick={start} title={disabled ?? undefined}>
+        <button className="btn btn-primary" disabled={!!missing || busy || !!disabled}
+                onClick={start} title={disabled ?? missing ?? undefined}>
           {busy ? "Starting…" : "Start test"}
         </button>
       </div>
 
-      {(known || disabled) && (
+      {/* The instrument. On the bar, because it is part of what a verdict
+          means — not a setting that can be made once and forgotten. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t
+                      border-line-soft px-4 py-2 text-[12px]">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+          Instrument
+          <Info>
+            A verdict is only comparable to another measured through the same
+            judge, the same reader and the same method version. All three are
+            stored on every row, and it is not a formality — the same engine read
+            by two qualified readers disagreed on tier for 13% of 136 languages.
+            Changing one here makes this run a <i>different</i> measurement
+            rather than a better one.
+          </Info>
+        </span>
+
+        {test === "capability" ? (
+          <>
+            <Inline label="judge">
+              <Pick models={eligible} binding={binding} value={judge}
+                    onChange={(v) => choose(() => setJudge(v))} />
+            </Inline>
+            <Inline label="readers">
+              <span className="flex flex-wrap gap-1">
+                {eligible.map((m) => (
+                  <Toggle key={m.id} on={readers.includes(m.id)} label={m.id}
+                          onClick={() => choose(() => setReaders(
+                            readers.includes(m.id)
+                              ? readers.filter((r) => r !== m.id)
+                              : [...readers, m.id]))} />
+                ))}
+              </span>
+            </Inline>
+          </>
+        ) : (
+          <Inline label="control models">
+            <span className="flex flex-wrap items-center gap-1">
+              {eligible.map((m) => (
+                <Toggle key={m.id} on={!attestors.length || attestors.includes(m.id)}
+                        label={m.id}
+                        onClick={() => choose(() => setAttestors(
+                          attestors.includes(m.id)
+                            ? attestors.filter((a) => a !== m.id)
+                            : [...(attestors.length ? attestors
+                                   : eligible.map((x) => x.id)), m.id]))} />
+              ))}
+              {!attestors.length && (
+                <span className="text-[11px] text-ink-faint">
+                  all eligible — the controls narrow them, which is the only
+                  narrowing that is evidence
+                </span>
+              )}
+            </span>
+          </Inline>
+        )}
+
+        <button className="btn btn-sm ml-auto" onClick={() => setOpen(!open)}>
+          {open ? "Hide detail" : "Why these?"}
+        </button>
+      </div>
+
+      {open && proposal && (
+        <div className="border-t border-line bg-surface px-4 py-2.5 text-[11.5px]
+                        leading-relaxed text-ink-faint">
+          <p>{proposal.rule}</p>
+          {proposal.excluded_by_family_guard.length > 0 && (
+            <p className="mt-1">
+              Not offered, because a model may not grade or read back its own
+              family's output:{" "}
+              <span className="font-mono">
+                {proposal.excluded_by_family_guard.join(", ")}
+              </span>
+            </p>
+          )}
+          <p className="mt-1">
+            Model list from the <b>{source}</b>
+            {binding
+              ? " — binding: a name absent from it has no endpoint and no key."
+              : " — advisory: it is the gateway's opinion, and a name missing from it is still worth trying."}
+          </p>
+        </div>
+      )}
+
+      {test === "dialect" && tag && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line-soft
+                        px-4 py-2 text-[12px]">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+            Contrast pair
+            <Info>Two named varieties. The umbrella tag is the conversion source and
+              is never a contrast arm — pairing it against a variety leaves one
+              answerable option, which is not a question.</Info>
+          </span>
+          {family.map((f: any) => (
+            <Toggle key={f.tag} on={varieties.includes(f.tag)}
+                    label={f.tag + (f.region ? ` · ${f.region}` : "")}
+                    onClick={() => setVarieties(varieties.includes(f.tag)
+                      ? varieties.filter((v) => v !== f.tag)
+                      : [...varieties, f.tag].slice(-2))} />
+          ))}
+        </div>
+      )}
+
+      {(known || disabled || missing) && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line-soft
                         px-4 py-1.5 text-[12px]">
           {disabled && <span className="text-bad">{disabled}</span>}
+          {!disabled && missing && <span className="text-ink-faint">{missing}</span>}
           {known && (
             <>
               <Badge tone={known.approved ? "ok" : "warn"}>
@@ -172,60 +307,69 @@ export function SetupBar({ models, enumerable, defaults, onStart, busy, disabled
           )}
         </div>
       )}
+    </div>
+  );
+}
 
-      {open && (
-        <div className="grid gap-4 border-t border-line bg-surface px-4 py-3
-                        md:grid-cols-3">
-          {test === "capability" ? (
-            <>
-              <ModelList label="Reader panel" models={models} enumerable={enumerable}
-                         value={readers} onChange={setReaders}
-                         info="Back-translators, in the order they are tried. The first that qualifies for this language is used — first to qualify, not best-scoring, because the qualification number separates fabrication from faithful reading and is simply wrong in the middle. Results from different readers are not comparable, which is why the reader is stored on every verdict." />
-              <ModelPick label="Judge" models={models} enumerable={enumerable}
-                         value={judge} onChange={setJudge}
-                         info="Grades fact recall on the back-translation. It never sees the target language, never sees which model produced the text, and is never the model under test." />
-            </>
-          ) : (
-            <>
-              <div>
-                <label className="label">
-                  Contrast pair
-                  <Info>Two named varieties. The umbrella tag is the conversion source and is never a contrast arm — pairing it against a variety leaves one answerable option, which is not a question.</Info>
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {family.map((f: any) => {
-                    const on = varieties.includes(f.tag);
-                    const locked = f.tag === tag;
-                    return (
-                      <button key={f.tag} disabled={locked}
-                        onClick={() => setVarieties(on
-                          ? varieties.filter((v) => v !== f.tag)
-                          : [...varieties, f.tag].slice(-2))}
-                        className={`chip ${on ? "border-accent bg-accent-soft text-accent" : ""}
-                                    ${locked ? "opacity-70" : "hover:border-accent"}`}>
-                        {f.tag}{f.region ? ` · ${f.region}` : ""}
-                      </button>
-                    );
-                  })}
-                </div>
-                {varieties.length !== 2 && (
-                  <p className="mt-1 text-[11.5px] text-warn">Pick exactly two.</p>
-                )}
-              </div>
-              <ModelList label="Control models" models={models} enumerable={enumerable}
-                         value={attestors} onChange={setAttestors}
-                         placeholder="leave empty to offer every reachable model"
-                         info="Who judges the dialect, blind. Leave this empty and every model the configuration can reach is offered — deliberately wide, because the panel is then narrowed by the controls, and that is the only narrowing that is evidence. The producer's whole family is always dropped. Every one of them is re-qualified for this family on every run." />
-            </>
-          )}
-          <div className="text-[11.5px] leading-relaxed text-ink-faint">
-            <b className="text-ink-soft">Why this is on screen.</b> A verdict is only
-            comparable with another measured through the same reader, the same
-            judge and the same method version. All three are stored on every
-            result, and changing one here makes this run a different measurement
-            rather than a better one.
-          </div>
-        </div>
+function Inline({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-ink-faint">{label}</span>
+      {children}
+    </span>
+  );
+}
+
+function Toggle({ on, label, onClick }: {
+  on: boolean; label: string; onClick: () => void;
+}) {
+  return (
+    <button onClick={onClick}
+      className={`chip font-mono transition-colors ${
+        on ? "border-accent bg-accent-soft text-accent"
+           : "opacity-60 hover:opacity-100"}`}>
+      {label}
+    </button>
+  );
+}
+
+function Pick({ models, binding, value, onChange }: {
+  models: ModelRow[]; binding: boolean; value: string;
+  onChange: (v: string) => void;
+}) {
+  if (!models.length && !binding) {
+    return <input className="field max-w-56 font-mono text-[12px]" value={value}
+                  placeholder="model id" onChange={(e) => onChange(e.target.value)} />;
+  }
+  return (
+    <select className="field max-w-56 font-mono text-[12px]" value={value}
+            onChange={(e) => onChange(e.target.value)}>
+      <option value="">choose…</option>
+      {!models.some((m) => m.id === value) && value &&
+        <option value={value}>{value}</option>}
+      {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+    </select>
+  );
+}
+
+function ModelPick({ label, models, value, onChange, info }: {
+  label: string; models: ModelRow[]; value: string;
+  onChange: (v: string) => void; info?: React.ReactNode;
+}) {
+  return (
+    <div className="min-w-48">
+      <label className="label flex items-center gap-1">{label}{info && <Info>{info}</Info>}</label>
+      {models.length ? (
+        <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
+          {!models.some((m) => m.id === value) && value &&
+            <option value={value}>{value}</option>}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>{m.title || m.id}</option>
+          ))}
+        </select>
+      ) : (
+        <input className="field" value={value} placeholder="model id"
+               onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
@@ -247,57 +391,6 @@ function Segment({ value, onChange, options, label, info }: {
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function ModelPick({ label, models, enumerable, value, onChange, info }: any) {
-  return (
-    <div>
-      <label className="label flex items-center gap-1">{label}<Info>{info}</Info></label>
-      {enumerable ? (
-        <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
-          {!models.some((m: ModelRow) => m.id === value) && <option value={value}>{value}</option>}
-          {models.map((m: ModelRow) => <option key={m.id} value={m.id}>{m.title}</option>)}
-        </select>
-      ) : (
-        <input className="field" value={value} onChange={(e) => onChange(e.target.value)} />
-      )}
-    </div>
-  );
-}
-
-function ModelList({ label, models, enumerable, value, onChange, info, placeholder }: any) {
-  const [raw, setRaw] = useState(value.join(", "));
-  useEffect(() => { setRaw(value.join(", ")); }, [value.join(",")]);
-  const ids = useMemo(() => models.map((m: ModelRow) => m.id), [models]);
-
-  return (
-    <div>
-      <label className="label flex items-center gap-1">{label}<Info>{info}</Info></label>
-      {enumerable ? (
-        <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto scroll">
-          {ids.map((id: string) => {
-            const on = value.includes(id);
-            return (
-              <button key={id}
-                onClick={() => onChange(on ? value.filter((v: string) => v !== id)
-                                           : [...value, id])}
-                className={`chip ${on ? "border-accent bg-accent-soft text-accent"
-                                      : "hover:border-accent"}`}>
-                {id}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <input className="field" value={raw} placeholder={placeholder}
-               onChange={(e) => { setRaw(e.target.value);
-                 onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean)); }} />
-      )}
-      {!value.length && placeholder && (
-        <p className="mt-1 text-[11.5px] text-ink-faint">{placeholder}</p>
-      )}
     </div>
   );
 }
