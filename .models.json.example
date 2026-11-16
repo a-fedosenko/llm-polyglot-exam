@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "Copy to data/models.json. `model_id` is the identity: it goes in the",
+    "request body, it is what the UI stores on every verdict, and renaming it",
+    "strands existing measurements. `model_title` is display only and is safe",
+    "to change at any time.",
+    "",
+    "Each model carries its own endpoint and its own key, so one run can reach",
+    "several providers. Keep this file under ./data — that is the directory",
+    "compose mounts into the container, and a path outside it resolves on the",
+    "host and vanishes in Docker."
+  ],
+  "models": [
+    { "model_title": "GPT-4o",     "model_id": "gpt-4o",
+      "api_key": "sk-...",         "v1_endpoint": "https://api.openai.com/v1" },
+    { "model_title": "Local Qwen", "model_id": "Qwen/Qwen2.5-72B-Instruct",
+      "api_key": "not-needed",     "v1_endpoint": "http://localhost:8001/v1" }
+  ]
+}

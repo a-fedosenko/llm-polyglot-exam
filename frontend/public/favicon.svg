@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Three marks, one of each verdict tone: the model did it, the instrument
+       declined to rule, the model did not. That is the whole vocabulary. -->
+  <rect width="32" height="32" rx="7" fill="#1c2230"/>
+  <circle cx="9"  cy="11" r="3.4" fill="#4ec08a"/>
+  <circle cx="9"  cy="21" r="3.4" fill="#e0a33c"/>
+  <circle cx="23" cy="11" r="3.4" fill="#e06a57"/>
+  <circle cx="23" cy="21" r="3.4" fill="#5b8cf0"/>
+</svg>

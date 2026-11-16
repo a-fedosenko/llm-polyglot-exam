@@ -1,0 +1,48 @@
+services:
+  app:
+    build: .
+    image: llm-polyglot-exam:latest
+
+    # Published on loopback. There is no authentication, because there is no
+    # second user and the port binding is the only control — widening this puts
+    # a tool that spends your API budget on your network.
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+
+    # Optional, so a fresh clone starts and tells you what is missing in the
+    # page rather than failing at `docker compose up` with a file-not-found.
+    env_file:
+      - path: .env
+        required: false
+
+    environment:
+      # Inside the container the repository root is /app, so a relative path in
+      # .env resolves there rather than on the host.
+      POLYGLOT_DATA_DIR: /app/data
+      HOME: /tmp
+
+    # Run as the host user, not as root.
+    #
+    # Everything this tool values lives in the bind mount — the SQLite file, the
+    # raw corpus — and a container writing them as root leaves the operator
+    # unable to read their own results from the CLI, or to delete a corpus file,
+    # without sudo. The database is the worse half: created root-owned by a
+    # first `docker compose up`, it is then unwritable by `polyglot status` on
+    # the host, and the failure arrives as a bare "attempt to write a readonly
+    # database".
+    #
+    # Override with UID/GID in .env if yours are not 1000.
+    user: "${UID:-1000}:${GID:-1000}"
+
+    # A local model server — vLLM, Ollama, llama.cpp — is a first-class case
+    # here, and from inside a container `localhost` is the container. Point
+    # v1_endpoint at http://host.docker.internal:<port>/v1 to reach one.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # `./data` is the only thing mounted, which is why a models.json anywhere
+    # else resolves on the host and vanishes inside.
+    volumes:
+      - ./data:/app/data
+
+    restart: unless-stopped

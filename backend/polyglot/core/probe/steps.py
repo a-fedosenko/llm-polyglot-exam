@@ -1,0 +1,117 @@
+"""The two primitive steps, extracted so the ladder can call them per rung.
+
+`generate_and_gate` costs one model call and no judge call -- it is what makes
+most negatives free, and what the designator sweep is scored on.
+`judge_item` is the paid half, run only on what survives.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from polyglot.core.bt import RemoteBackTranslator
+from polyglot.core.client import OpenAICompatClient
+from polyglot.core.probe import designator as dsg
+from polyglot.core.probe.corpus import Corpus, Record
+from polyglot.core.probe.gate import GateResult, check as gate_check
+from polyglot.core.probe.judge import Judgement
+from polyglot.core.probe.judge import judge as run_judge
+from polyglot.core.probe.specs import Spec
+from polyglot.core.scheme import Language
+
+
+@dataclass
+class ItemOutcome:
+    spec_id: str
+    designator: str
+    generation: str | None
+    gate: GateResult
+    back_translation: str | None = None
+    judgement: Judgement | None = None
+    error: str | None = None
+    #: The fact checklist this item is graded against, carried on the item so a
+    #: reader can see which fact a verdict refers to. Index-aligned with
+    #: `judgement.verdicts`.
+    facts: list[str] = field(default_factory=list)
+    #: Exactly what was sent. The corpus has had it all along, but a verdict you
+    #: can only check by opening a JSONL file is a verdict most people take on
+    #: trust -- and "read the raw evidence before believing a number" is the
+    #: convention that has found most of this project's real defects.
+    prompt: str = ""
+
+    @property
+    def lang_ok(self) -> bool:
+        return self.gate.passed
+
+    @property
+    def counts_against(self) -> bool:
+        """Void items -- memorised text, too short, weak LID -- are neither a pass
+        nor evidence against the model, so they are excluded from s_lang."""
+        return self.gate.is_negative
+
+    @property
+    def content(self) -> float | None:
+        return self.judgement.recall if self.judgement and self.judgement.ok else None
+
+
+
+#: Every call in this package takes an optional pre-built prompt.
+#:
+#: The builders were always pure functions; what was missing was a way to send
+#: one back. Without it a page offering to show you the prompt before you pay
+#: for the call has to *rebuild* it, and a pre-flight assembled from a second
+#: copy of the rule describes a run that is not the one about to happen — the
+#: exact failure convention 9 records (an analysis harness re-implemented a
+#: production call, got it subtly wrong, and 68 bad verdicts reached a
+#: protocol's conclusions).
+#:
+#: So: `None` means build it here, as before, byte for byte. Anything else is
+#: sent verbatim, and the run that used it is flagged `prompt_edited` and kept
+#: out of the comparable results — editing the instrument is allowed, publishing
+#: the reading as if you had not is not.
+
+
+def generate_and_gate(*, client: OpenAICompatClient, engine: str, lang: Language,
+                      designator: str, spec: Spec, corpus: Corpus,
+                      relatives: set[str], accept: set[str],
+                      abstain: set[str] | None = None,
+                      n_sentences: int = 3,
+                      messages: tuple[str, str] | None = None) -> ItemOutcome:
+    system, user = messages or dsg.generation_prompt(
+        designator, spec.scenario, n_sentences,
+        script_name=dsg.script_name_for(lang.script))
+    gen = client.complete(engine, user, max_tokens=400, system=system)
+    # Both halves are recorded. A corpus entry holding only the user message
+    # would make a run look as if the model had been asked almost nothing.
+    shown = f"{system}\n\n--- user ---\n\n{user}"
+    corpus.write(Record("generation", engine, lang.tag, spec.id, designator, shown,
+                        gen.text, gen.error, gen.usage, gen.latency_s))
+    # The copy check compares the output against everything the model was shown,
+    # so it has to see both messages: an output echoing the system half is still
+    # an echo, and would otherwise pass as original text.
+    gate = gate_check(gen.text, prompt=shown, expect_lang=lang.iso639_3,
+                      expect_script=lang.script, relatives=relatives, accept_lang=accept,
+                      abstain_lang=abstain)
+    return ItemOutcome(spec.id, designator, gen.text, gate, error=gen.error,
+                       facts=list(spec.facts), prompt=shown)
+
+
+def judge_item(item: ItemOutcome, *, client: OpenAICompatClient, judge_model: str,
+               backtranslator: RemoteBackTranslator, spec: Spec, tag: str,
+               corpus: Corpus, bt_prompt: str | None = None,
+               judge_prompt: str | None = None) -> ItemOutcome:
+    """Back-translate and grade. Only ever called on items that passed the gate."""
+    bt = backtranslator.translate(item.generation or "", prompt=bt_prompt)
+    corpus.write(Record("backtranslation", backtranslator.id, tag, spec.id,
+                        item.designator, "", bt.text, bt.error))
+    if not bt.ok:
+        item.error = bt.error
+        return item
+
+    judgement = run_judge(client, judge_model, bt.text or "", spec.facts,
+                          prompt=judge_prompt)
+    corpus.write(Record("judgement", judge_model, tag, spec.id, item.designator, "",
+                        judgement.raw, judgement.error,
+                        meta={"verdicts": [v.value for v in judgement.verdicts]}))
+    item.back_translation = bt.text
+    item.judgement = judgement
+    return item

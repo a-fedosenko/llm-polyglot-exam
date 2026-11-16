@@ -1,0 +1,27 @@
+# The build context is sent to the daemon in full, and these are 260 MB of it.
+frontend/node_modules
+frontend/dist
+backend/.venv
+backend/static
+backend/*.egg-info
+**/__pycache__
+**/*.pyc
+.pytest_cache
+backend/.pytest_cache
+
+# Secrets never enter an image.
+.env
+data/models.json
+
+# Produced, and regenerated inside the container or mounted from the host.
+data/polyglot.db
+data/polyglot.db-*
+data/corpus
+data/cache
+data/models
+data/runs
+data/results
+data/controls/flores.json
+
+.git
+.gitignore
