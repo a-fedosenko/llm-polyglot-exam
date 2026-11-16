@@ -194,14 +194,20 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
                 "configured — see GET /api/models for what this installation "
                 "can reach, and the pair it proposes.")
         chosen_specs, edited_specs = specs_for(specs)
+        # An ordered fallback chain, not a set. `route()` takes the first
+        # member that qualifies for this language and stops, so exactly one
+        # reader is ever used and exactly one is recorded on the verdict. The
+        # rest cost nothing unless an earlier one fails to qualify.
         panel = list(backtranslator_panel or [])
         if not panel:
             raise RunError(
-                "No reader panel was chosen. Results from different "
+                "No reader was chosen. Results read back by different "
                 "back-translators are not comparable — the same engine read by "
                 "two qualified readers disagreed on tier for 13% of 136 "
                 "languages — so the reader is picked per run rather than "
-                "configured.")
+                "configured. Give at least one; further entries are fallbacks, "
+                "tried in order only if an earlier one cannot be qualified for "
+                "the language.")
         # A model that is both under test and in the reader panel would be
         # dropped from its own panel and then measured through a different
         # instrument from every other engine, which invalidates the comparison.

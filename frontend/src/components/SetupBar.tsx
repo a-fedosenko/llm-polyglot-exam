@@ -205,10 +205,14 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       </div>
 
       {/* The instrument. On the bar, because it is part of what a verdict
-          means — not a setting that can be made once and forgotten. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t
-                      border-line-soft px-4 py-2 text-[12px]">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+          means — not a setting that can be made once and forgotten.
+
+          Laid out as a label column and a content column so the rows line up
+          whatever the labels are called. */}
+      <div className="flex items-start gap-3 border-t border-line-soft px-4 py-2">
+        <span className="flex shrink-0 items-center gap-1 whitespace-nowrap pt-0.5
+                         text-[11px] font-semibold uppercase tracking-wider
+                         text-ink-faint">
           Instrument
           <Info>
             A verdict is only comparable to another measured through the same
@@ -220,48 +224,84 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
           </Info>
         </span>
 
-        {test === "capability" ? (
-          <>
-            <Inline label="judge">
-              <Pick models={eligible} binding={binding} value={judge}
-                    locked={!!locked}
-                    onChange={(v) => choose(() => setJudge(v))} />
-            </Inline>
-            <Inline label="readers">
-              <span className="flex flex-wrap gap-1">
-                {eligible.map((m) => (
-                  <Toggle key={m.id} on={readers.includes(m.id)} label={m.id}
-                          onClick={() => choose(() => setReaders(
-                            readers.includes(m.id)
-                              ? readers.filter((r) => r !== m.id)
-                              : [...readers, m.id]))} />
-                ))}
-              </span>
-            </Inline>
-          </>
-        ) : (
-          <Inline label={`control models (${attestors.length}/${MAX_PANEL})`}>
-            <span className="flex flex-wrap items-center gap-1">
-              {eligible.map((m) => {
-                const on = attestors.includes(m.id);
-                const full = !on && attestors.length >= MAX_PANEL;
-                return (
-                  <Toggle key={m.id} on={on} label={m.id} dim={full}
-                          onClick={() => choose(() => setAttestors(
-                            on ? attestors.filter((a) => a !== m.id)
-                               : full ? attestors : [...attestors, m.id]))} />
-                );
-              })}
-              {!attestors.length && (
-                <span className="text-[11px] text-warn">
-                  none selected — pick {MIN_PANEL}–{MAX_PANEL}
-                </span>
-              )}
-            </span>
-          </Inline>
-        )}
+        <div className="grid min-w-0 flex-1 grid-cols-[5.5rem_minmax(0,1fr)]
+                        items-center gap-x-3 gap-y-1.5 text-[12px]">
+          {test === "capability" ? (
+            <>
+              <Row label="judge" info="Grades fact recall on the back-translation. It reads only the pivot language, never the target, and is never the model under test.">
+                <Pick models={eligible} binding={binding} value={judge}
+                      locked={!!locked}
+                      onChange={(v) => choose(() => setJudge(v))} />
+                {judge && readers.includes(judge) && (
+                  <span className="ml-2 text-[11px] text-warn">
+                    also in the reader chain — it would be grading its own
+                    translation
+                  </span>
+                )}
+              </Row>
 
-        <button className="btn btn-sm ml-auto" onClick={() => setOpen(!open)}>
+              <Row label="reader chain"
+                   info={<>
+                     <b>Exactly one reader is used.</b> They are tried in this
+                     order and the <i>first that qualifies for this language</i>
+                     is the one that reads it back — the rest are fallbacks that
+                     cost nothing unless an earlier one fails. Only the winner is
+                     recorded on the verdict.
+                     <br /><br />
+                     It is a chain and not a set because no single model reads
+                     every language: one fabricates Chuvash, another reads it
+                     correctly. First to qualify, not best-scoring — the
+                     qualification number separates fabrication from faithful
+                     reading and is simply wrong in the middle.
+                   </>}>
+                <Chain items={readers} locked={!!locked}
+                       onPromote={(i) => choose(() => setReaders(move(readers, i, i - 1)))}
+                       onRemove={(i) => choose(() => setReaders(
+                         readers.filter((_, j) => j !== i)))} />
+              </Row>
+
+              {eligible.some((m) => !readers.includes(m.id)) && (
+                <Row label="add">
+                  <span className="flex flex-wrap gap-1">
+                    {eligible.filter((m) => !readers.includes(m.id)).map((m) => (
+                      <Toggle key={m.id} on={false} label={`+ ${m.id}`}
+                              onClick={() => choose(() => setReaders([...readers, m.id]))} />
+                    ))}
+                  </span>
+                </Row>
+              )}
+            </>
+          ) : (
+            <Row label={`controls ${attestors.length}/${MAX_PANEL}`}
+                 info={<>
+                   The models that judge the dialect, blind. Unlike a reader
+                   chain, <b>every one of these answers</b> — they are a panel,
+                   not a fallback — and each costs three control calls plus two
+                   attestations. A panel of one is still reported at low
+                   confidence, because one judge is one opinion.
+                 </>}>
+              <span className="flex flex-wrap items-center gap-1">
+                {eligible.map((m) => {
+                  const on = attestors.includes(m.id);
+                  const full = !on && attestors.length >= MAX_PANEL;
+                  return (
+                    <Toggle key={m.id} on={on} label={m.id} dim={full}
+                            onClick={() => choose(() => setAttestors(
+                              on ? attestors.filter((a) => a !== m.id)
+                                 : full ? attestors : [...attestors, m.id]))} />
+                  );
+                })}
+                {!attestors.length && (
+                  <span className="text-[11px] text-warn">
+                    none selected — pick {MIN_PANEL}–{MAX_PANEL}
+                  </span>
+                )}
+              </span>
+            </Row>
+          )}
+        </div>
+
+        <button className="btn btn-sm shrink-0" onClick={() => setOpen(!open)}>
           {open ? "Hide detail" : "Why these?"}
         </button>
       </div>
@@ -289,14 +329,17 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       )}
 
       {test === "dialect" && tag && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-line-soft
+        <div className="flex items-start gap-3 border-t border-line-soft
                         px-4 py-2 text-[12px]">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap pt-0.5
+                           text-[11px] font-semibold uppercase tracking-wider
+                           text-ink-faint">
             Contrast pair
             <Info>Two named varieties. The umbrella tag is the conversion source and
               is never a contrast arm — pairing it against a variety leaves one
               answerable option, which is not a question.</Info>
           </span>
+          <span className="flex flex-wrap items-center gap-1">
           {family.map((f: any) => (
             <Toggle key={f.tag} on={varieties.includes(f.tag)}
                     label={f.tag + (f.region ? ` · ${f.region}` : "")}
@@ -305,6 +348,7 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                         ? varieties.filter((v) => v !== f.tag)
                         : [...varieties, f.tag].slice(-2)); }} />
           ))}
+          </span>
         </div>
       )}
 
@@ -337,13 +381,73 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   );
 }
 
-function Inline({ label, children }: { label: string; children: React.ReactNode }) {
+/** One labelled row of the instrument grid. The label sits in its own column
+ *  so `judge` and `reader chain` line up however long either gets. */
+function Row({ label, info, children }: {
+  label: string; info?: React.ReactNode; children: React.ReactNode;
+}) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span className="text-ink-faint">{label}</span>
-      {children}
-    </span>
+    <>
+      <span className="flex items-center justify-end gap-1 whitespace-nowrap
+                       text-ink-faint">
+        {label}{info && <Info>{info}</Info>}
+      </span>
+      <span className="flex min-w-0 flex-wrap items-center gap-1">{children}</span>
+    </>
   );
+}
+
+/** The reader chain, in the order it will actually be tried.
+ *
+ * Numbered, because the order is the whole of the meaning: `route()` takes the
+ * first member that qualifies for the language and stops, so #1 is the reader
+ * you will almost always get and the rest are insurance. Shown as a chain
+ * rather than a row of equal chips, which is what it looked like before and
+ * read as "several readers will be used". Exactly one ever is. */
+function Chain({ items, onPromote, onRemove, locked }: {
+  items: string[]; onPromote: (i: number) => void; onRemove: (i: number) => void;
+  locked?: boolean;
+}) {
+  if (!items.length) {
+    return <span className="text-[11px] text-warn">none chosen</span>;
+  }
+  return (
+    <>
+      {items.map((id, i) => (
+        <span key={id} className="flex items-center">
+          {i > 0 && <span className="px-1 text-ink-faint" aria-hidden>→</span>}
+          <span className={`inline-flex items-center gap-1 rounded-full border
+                            py-0.5 pl-1.5 pr-1 font-mono text-[11px] ${
+            i === 0 ? "border-accent bg-accent-soft text-accent"
+                    : "border-line text-ink-soft"}`}>
+            <span className="tabular-nums opacity-60">{i + 1}</span>
+            {id}
+            {!locked && i > 0 && (
+              <button onClick={() => onPromote(i)} title="Try this one first"
+                      className="px-0.5 opacity-50 hover:opacity-100">↑</button>
+            )}
+            {!locked && (
+              <button onClick={() => onRemove(i)} title="Remove from the chain"
+                      className="px-0.5 opacity-50 hover:opacity-100">×</button>
+            )}
+          </span>
+        </span>
+      ))}
+      <span className="ml-1 text-[11px] text-ink-faint">
+        {items.length === 1
+          ? "no fallback — an unqualified reader means `unverified`"
+          : `#1 is used unless it fails to qualify`}
+      </span>
+    </>
+  );
+}
+
+function move<T>(xs: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= xs.length) return xs;
+  const out = [...xs];
+  const [x] = out.splice(from, 1);
+  out.splice(to, 0, x);
+  return out;
 }
 
 function Toggle({ on, label, onClick, dim }: {

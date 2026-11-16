@@ -173,7 +173,7 @@ def test_a_capability_run_refuses_to_inherit_an_instrument(client):
     r = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
                                        "engine": "acme-a", "judge_model": "other-c"})
     assert r.status_code == 400
-    assert "No reader panel was chosen" in r.json()["detail"]
+    assert "No reader was chosen" in r.json()["detail"]
 
 
 def test_a_dialect_run_needs_no_judge(client):
