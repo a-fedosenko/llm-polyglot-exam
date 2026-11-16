@@ -233,3 +233,17 @@ def test_a_dialect_run_requires_between_one_and_three_control_models(client):
 
     r = client.post("/api/runs", json={**base, "attestors": ["other-b"]})
     assert r.status_code == 201, r.text
+
+
+def test_a_dialect_run_refuses_a_pair_that_excludes_its_own_subject(client):
+    """Caught before anything is spent.
+
+    A battery whose subject is not one of its arms produces no text for the
+    subject, so `_pair` has nothing to attest — and the run would die at the
+    verdict having already paid for three generations and two conversions.
+    """
+    r = client.post("/api/runs", json={
+        "test_type": "dialect", "tag": "pt-br", "engine": "acme-a",
+        "varieties": ["pt-pt", "pt-cv"], "attestors": ["other-b"]})
+    assert r.status_code == 400
+    assert "has to be one of the two arms" in r.json()["detail"]

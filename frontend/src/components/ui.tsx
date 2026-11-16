@@ -48,11 +48,11 @@ export function Badge({ tone = "", children }: { tone?: Tone; children: ReactNod
  * longer inherits the `uppercase` and letter-spacing of a `.label` it happens
  * to sit inside, and it can be clamped to the viewport instead of running off
  * the edge of whichever panel it started in. */
-export function Info({ children }: { children: ReactNode }) {
+export function Info({ children, wide }: { children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLButtonElement>(null);
   const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
 
-  const WIDTH = 300;
+  const WIDTH = wide ? 420 : 300;
   const GAP = 8;
 
   const show = () => {
@@ -68,7 +68,7 @@ export function Info({ children }: { children: ReactNode }) {
     // Flipped above the trigger when there is not room below it, which is the
     // common case for anything in the bottom half of the page.
     const roomBelow = window.innerHeight - r.bottom;
-    setAt(roomBelow > 190
+    setAt(roomBelow > (wide ? 300 : 190)
       ? { left, top: r.bottom + GAP }
       : { left, bottom: window.innerHeight - r.top + GAP });
   };
@@ -108,9 +108,10 @@ export function Info({ children }: { children: ReactNode }) {
           role="tooltip"
           style={{ position: "fixed", left: at.left, top: at.top,
                    bottom: at.bottom, width: WIDTH }}
-          className="pointer-events-none z-[9999] rounded-md border border-line
-                     bg-panel p-3 text-[12px] font-normal normal-case leading-relaxed
-                     tracking-normal text-ink-soft shadow-xl"
+          className="pointer-events-none z-[9999] max-h-[70vh] overflow-hidden
+                     rounded-md border border-line bg-panel p-3 text-[12px]
+                     font-normal normal-case leading-relaxed tracking-normal
+                     text-ink-soft shadow-xl"
         >
           {children}
         </div>,
@@ -217,7 +218,7 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 /** A searchable picker that stays open on the keyboard. */
-export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, query, onQuery, hint, locked }: {
+export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, query, onQuery, hint, locked, width = "w-64" }: {
   value: string;
   items: T[];
   keyOf: (t: T) => string;
@@ -228,6 +229,9 @@ export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, que
   onQuery: (q: string) => void;
   hint?: ReactNode;
   locked?: boolean;
+  /** Fixed rather than fluid: a search field that stretches to fill a toolbar
+   *  reads as the most important control on it, and it is the second step. */
+  width?: string;
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -240,7 +244,7 @@ export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, que
   }, []);
 
   return (
-    <div className="relative" ref={box}>
+    <div className={`relative ${width}`} ref={box}>
       <input
         className="field"
         placeholder={placeholder}

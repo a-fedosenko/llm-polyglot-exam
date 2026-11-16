@@ -230,6 +230,12 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
             raise RunError(
                 "A dialect test contrasts two named varieties. Pick two — the "
                 "umbrella tag is the conversion source, not a contrast arm.")
+        if tag not in varieties:
+            raise RunError(
+                f"{tag!r} is the variety under test, so it has to be one of the "
+                f"two arms; got {varieties!r}. Without it the battery produces "
+                f"no text for the subject at all, and the run would spend five "
+                f"calls before dying at the verdict with nothing to attest.")
         langs = []
         for t in varieties:
             lang = scheme.get(t)
