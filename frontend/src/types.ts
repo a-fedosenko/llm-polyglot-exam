@@ -92,7 +92,10 @@ export interface ItemDetail {
 
 export interface RunSnapshot {
   id: string;
-  status: "running" | "done" | "failed" | "cancelled";
+  //: `interrupted` is server-derived, not stored: a row still marked `running`
+  //: whose process is gone is not running, and a page that believed the row
+  //: would show a "Run next step" button that can never work.
+  status: "running" | "done" | "failed" | "cancelled" | "interrupted";
   mode: Mode;
   auto?: boolean;
   live?: boolean;

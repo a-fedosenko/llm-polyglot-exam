@@ -6,7 +6,15 @@ import { SetupBar, type Setup } from "./components/SetupBar";
 import { Stage } from "./components/Stage";
 import { StepRail } from "./components/StepRail";
 import { VerdictPanel } from "./components/VerdictPanel";
-import { Empty, Info } from "./components/ui";
+import { Confirm, Empty, Info } from "./components/ui";
+
+//: Where the open run's id is kept across a page reload.
+//:
+//: The run itself lives in the server process, so a reload never destroyed it
+//: — the page simply forgot which one it had been watching, which from the
+//: operator's side is the same thing as losing it mid-measurement. Session
+//: storage rather than local: a run belongs to the tab that opened it.
+const OPEN_RUN = "polyglot.open-run";
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -20,6 +28,27 @@ export default function App() {
   useEffect(() => {
     api.config().then(setConfig).catch((e) => setError(e.message));
   }, []);
+
+  // Reconnect to whatever run this tab had open. A run that outlived its page
+  // is resumed exactly where it was; one that outlived its *process* comes back
+  // `interrupted` and read-only, which is the honest answer — its evidence is
+  // all still on disk and it cannot be continued.
+  useEffect(() => {
+    const id = sessionStorage.getItem(OPEN_RUN);
+    if (!id) return;
+    api.run(id)
+      .then((snap) => {
+        setRun(snap);
+        if (snap.status === "running" && snap.auto) watch(id);
+      })
+      .catch(() => sessionStorage.removeItem(OPEN_RUN));
+  }, []);
+
+  // Kept in step with the run, so a reload at any moment finds the right one.
+  useEffect(() => {
+    if (run) sessionStorage.setItem(OPEN_RUN, run.id);
+    else sessionStorage.removeItem(OPEN_RUN);
+  }, [run?.id]);
 
   // The selected step follows the run forward, but only while the reader has
   // not chosen one themselves. Yanking the stage away from someone reading a
@@ -49,6 +78,16 @@ export default function App() {
   }, []);
 
   useEffect(() => closeStream, []);
+
+  const abort = async () => {
+    if (!run) return;
+    closeStream();
+    try { await api.closeRun(run.id); } catch { /* it is going away regardless */ }
+    sessionStorage.removeItem(OPEN_RUN);
+    setRun(null);
+    setAdjudication(null);
+    setSelected(null);
+  };
 
   const start = async (s: Setup) => {
     setBusy(true); setError(null); setAdjudication(null); following.current = true;
@@ -135,6 +174,13 @@ export default function App() {
 
   const current = run?.steps.find((s) => s.ordinal === selected) ?? null;
   const live = run?.status === "running";
+  // Every control in the setup bar describes the run already in flight, so
+  // changing one would make the bar disagree with the steps on screen.
+  const locked = run
+    ? (live
+        ? `A ${run.test_type} run on ${run.tag} is open — abort it to change this.`
+        : `Showing a finished ${run.test_type} run on ${run.tag}. Start a new test to change this.`)
+    : null;
   const blocked = config && !config.models_configured
     ? "No model endpoint is configured — see the banner below."
     : null;
@@ -143,7 +189,7 @@ export default function App() {
     <div className="flex h-full flex-col">
       <TopBar config={config} run={run} />
 
-      <SetupBar onStart={start} busy={busy} disabled={blocked} />
+      <SetupBar onStart={start} busy={busy} disabled={blocked} locked={locked} />
 
       {config && !config.models_configured && (
         <Banner tone="bad" title="No model endpoint is configured">
@@ -189,10 +235,10 @@ export default function App() {
               <VerdictPanel runId={run.id} outcome={run.outcome}
                             promptEdited={run.prompt_edited}
                             adjudication={adjudication}
-                            onClear={() => { closeStream(); setRun(null); setAdjudication(null); }} />
+                            onClear={abort} />
             ) : (
               <Progress run={run} busy={busy} onStep={() => step()}
-                        onAuto={goAuto} onPause={pause} />
+                        onAuto={goAuto} onPause={pause} onAbort={abort} />
             )}
           </aside>
         </main>
@@ -224,9 +270,9 @@ function TopBar({ config, run }: { config: Config | null; run: RunSnapshot | nul
   );
 }
 
-function Progress({ run, busy, onStep, onAuto, onPause }: {
+function Progress({ run, busy, onStep, onAuto, onPause, onAbort }: {
   run: RunSnapshot; busy: boolean;
-  onStep: () => void; onAuto: () => void; onPause: () => void;
+  onStep: () => void; onAuto: () => void; onPause: () => void; onAbort: () => void;
 }) {
   const spent = Object.entries(run.spent ?? {}).filter(([, v]) => v > 0);
   const total = spent.reduce((a, [, v]) => a + v, 0);
@@ -270,7 +316,29 @@ function Progress({ run, busy, onStep, onAuto, onPause }: {
               Run the rest automatically
             </button>
           )}
+          <Confirm
+            label="Abort"
+            question="Abort this run? Its steps stay on record; nothing further is spent."
+            confirmLabel="Abort it"
+            onConfirm={onAbort}
+          />
         </div>
+      )}
+
+      {run.status === "interrupted" && (
+        <p className="rounded-md border border-warn/30 bg-warn-soft p-3 text-[12.5px]
+                      leading-relaxed text-warn">
+          <b>This run outlived the process that was driving it.</b> Every step it
+          finished is on record and readable, and the corpus kept every text — but
+          a half-finished measurement cannot be picked up again, so it stops here.
+        </p>
+      )}
+
+      {run.status === "cancelled" && (
+        <p className="rounded-md border border-line bg-surface p-3 text-[12.5px]
+                      leading-relaxed text-ink-soft">
+          Aborted. What it had already paid for is kept.
+        </p>
       )}
 
       {run.status === "failed" && (

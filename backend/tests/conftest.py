@@ -52,6 +52,55 @@ class ScriptedClient:
         return "other"
 
 
+#: The control set the tests measure against.
+#:
+#: Pinned rather than loaded from disk, and the reason is a failure this suite
+#: actually had: once `polyglot bootstrap` fetched the real FLORES controls,
+#: `de` acquired a real reference, the scripted back-translation scored chrF++
+#: 5.4 against it, the reader stopped qualifying and three tests changed their
+#: answers. A suite whose verdict depends on whether an optional 1.6 GB asset
+#: has been downloaded is not a suite anyone can trust.
+#:
+#: The reference here is exactly what `ScriptedClient` back-translates to, so a
+#: qualification run scores a perfect match and the tests exercise the *ladder*
+#: rather than the quality of a fixture's German.
+BACK = ("The bus arrived late. It was raining heavily that morning. "
+        "She did not reach the office until after nine.")
+
+CONTROLS = {
+    "de": {"kind": "reference",
+           "items": [{"text": "Der Bus kam zu spät an.", "reference": BACK}] * 2},
+    "pt": {"kind": "reference",
+           "items": [{"text": "O ônibus atrasou.", "reference": BACK}] * 2},
+}
+
+
+@pytest.fixture(autouse=True)
+def pinned_controls(monkeypatch):
+    """Every test measures against the same controls, downloaded or not.
+
+    Patched in both namespaces, and reached through `sys.modules`, because the
+    package shadows its own submodule: `polyglot.core.bt/__init__.py` does
+    `from .qualify import qualify`, which rebinds the attribute `qualify` on the
+    package from the module to the function. So `import polyglot.core.bt.qualify
+    as m` binds the *function*, and a dotted monkeypatch string walks into the
+    same trap. Worth knowing before adding anything else to that package.
+
+    Both namespaces, because `qualify()` calls `load_controls` from its own
+    module while `pivot.panel_for` imports it from the package at call time.
+    """
+    import sys
+
+    import polyglot.core.bt as bt_pkg
+    qualify_mod = sys.modules["polyglot.core.bt.qualify"]
+
+    def fake(pivot: str = "en") -> dict:
+        return {k: dict(v) for k, v in CONTROLS.items()}
+
+    monkeypatch.setattr(qualify_mod, "load_controls", fake)
+    monkeypatch.setattr(bt_pkg, "load_controls", fake)
+
+
 @pytest.fixture
 def scripted():
     return ScriptedClient

@@ -44,7 +44,24 @@ MAX_SESSIONS = 6
 
 #: A session nobody has touched for this long is abandoned — a closed tab, not a
 #: decision — and is reaped so its corpus file is not left open forever.
+#:
+#: Long on purpose: a page reload must not cost a run. The browser reconnects to
+#: the same session by id, so the only thing this timeout is for is a tab that
+#: is really gone.
 IDLE_TIMEOUT_S = 60 * 60
+
+#: How many control models one dialect battery may use.
+#:
+#: The floor is one because a verdict needs somebody to have answered; a panel
+#: of one is still reported `low` confidence, since one judge is one opinion.
+#:
+#: The ceiling is three, and it is a cost rule rather than a methodological one:
+#: every control model costs three control calls plus two attestations, so a
+#: fourth adds five calls for a vote that rarely changes a unanimous verdict.
+#: Protocol 021's own sample is a three-attestor panel. Without a ceiling the
+#: obvious gesture — "use everything available" — quietly multiplies a 15-call
+#: run into a 65-call one.
+MIN_ATTESTORS, MAX_ATTESTORS = 1, 3
 
 
 class RunError(RuntimeError):
@@ -221,10 +238,21 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
             raise RunError(
                 f"No umbrella tag for {tag!r} to convert from. The conversion "
                 f"probe rewrites neutral text into the variety, so it needs one.")
+        # Named explicitly, never defaulted to "everything eligible". The
+        # default used to be the whole field, and an unattended gesture that
+        # spends five calls per model is the wrong kind of convenient.
+        chosen = list(attestors or [])
+        if not MIN_ATTESTORS <= len(chosen) <= MAX_ATTESTORS:
+            raise RunError(
+                f"Pick between {MIN_ATTESTORS} and {MAX_ATTESTORS} control "
+                f"models; got {len(chosen)}. Each one costs three control calls "
+                f"and two attestations, so a panel is a budget decision as much "
+                f"as a methodological one — and a panel of one is still reported "
+                f"at low confidence, because one judge is one opinion.")
         chosen_specs, edited_specs = specs_for(specs)
         machine = DialectMachine(
             scheme=scheme, tag=tag, engine=engine, client=client,
-            attestors=attestors or _default_attestors(engine),
+            attestors=chosen,
             varieties=langs, neutral_tag=neutral,
             scenario=scenario or chosen_specs[0].scenario, corpus=corpus,
             record=DbAttestorRecord())
@@ -262,20 +290,6 @@ def _umbrella_for(scheme, lang):
         if cand.lang == lang.lang and cand.inclusive:
             return cand.tag
     return None
-
-
-def _default_attestors(engine: str) -> list[str]:
-    """Every model the configuration can reach, minus the producer's family.
-
-    Deliberately wide. The panel is then narrowed by the controls, which is the
-    only narrowing that is evidence — a shortlist chosen in advance is a guess
-    about who knows the dialect, and that guess is exactly what the controls
-    exist to replace.
-    """
-    from polyglot.core import discovery
-
-    models, _binding = discovery.available()
-    return discovery.propose(engine, models)["attestors"]
 
 
 # -- driving it ----------------------------------------------------------------

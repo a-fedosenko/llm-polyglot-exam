@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Tone } from "../types";
 
 export const toneText: Record<string, string> = {
@@ -35,37 +36,117 @@ export function Badge({ tone = "", children }: { tone?: Tone; children: ReactNod
 
 /** A definition on hover, for every term the method uses in a particular way.
  *
- * The previous tool kept these in one dictionary in the page and they drifted
- * from the code. Here the explanatory text that belongs to a *step* is served
- * with the step; this component is for the handful of words the page itself
- * introduces. */
+ * **Rendered into a portal, not next to the trigger.** The obvious version —
+ * an absolutely positioned bubble inside a `relative` span — is clipped by the
+ * first ancestor with `overflow` set, and this layout is full of them: the rail
+ * scrolls, the stage scrolls, and the body itself is `overflow: hidden` because
+ * the page is not supposed to scroll at all. No `z-index` fixes that; a clipped
+ * child is clipped whatever its stacking order. So the bubble is attached to
+ * `document.body` and positioned from the trigger's own rect.
+ *
+ * Two things fall out of the portal that are worth having anyway: the text no
+ * longer inherits the `uppercase` and letter-spacing of a `.label` it happens
+ * to sit inside, and it can be clamped to the viewport instead of running off
+ * the edge of whichever panel it started in. */
 export function Info({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+
+  const WIDTH = 300;
+  const GAP = 8;
+
+  const show = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    // Clamped to the viewport, so a tooltip on a control at the right-hand
+    // edge opens inwards rather than off-screen.
+    const left = Math.min(
+      Math.max(GAP, r.left + r.width / 2 - WIDTH / 2),
+      Math.max(GAP, window.innerWidth - WIDTH - GAP),
+    );
+    // Flipped above the trigger when there is not room below it, which is the
+    // common case for anything in the bottom half of the page.
+    const roomBelow = window.innerHeight - r.bottom;
+    setAt(roomBelow > 190
+      ? { left, top: r.bottom + GAP }
+      : { left, bottom: window.innerHeight - r.top + GAP });
+  };
+
+  // A tooltip anchored to a rect it captured once is wrong the moment anything
+  // moves, and the panels under it scroll.
+  useEffect(() => {
+    if (!at) return;
+    const close = () => setAt(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [at]);
+
   return (
-    <span className="relative inline-flex">
+    <>
       <button
+        ref={ref}
         type="button"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        className="grid size-4 place-items-center rounded-full border border-line
-                   text-[9px] font-bold text-ink-faint hover:border-accent
-                   hover:text-accent"
+        onMouseEnter={show}
+        onMouseLeave={() => setAt(null)}
+        onFocus={show}
+        onBlur={() => setAt(null)}
+        onClick={(e) => { e.preventDefault(); at ? setAt(null) : show(); }}
+        className="grid size-4 shrink-0 place-items-center rounded-full border
+                   border-line text-[9px] font-bold normal-case tracking-normal
+                   text-ink-faint hover:border-accent hover:text-accent"
         aria-label="What this means"
       >
         ?
       </button>
-      {open && (
-        <span className="absolute left-1/2 top-6 z-50 w-72 -translate-x-1/2 rounded-md
-                         border border-line bg-panel p-2.5 text-[12px] font-normal
-                         leading-relaxed text-ink-soft shadow-lg">
+      {at && createPortal(
+        <div
+          role="tooltip"
+          style={{ position: "fixed", left: at.left, top: at.top,
+                   bottom: at.bottom, width: WIDTH }}
+          className="pointer-events-none z-[9999] rounded-md border border-line
+                     bg-panel p-3 text-[12px] font-normal normal-case leading-relaxed
+                     tracking-normal text-ink-soft shadow-xl"
+        >
           {children}
-        </span>
+        </div>,
+        document.body,
       )}
+    </>
+  );
+}
+
+
+/** A destructive action that asks first, inline — no modal to dismiss. */
+export function Confirm({ label, question, confirmLabel, onConfirm, className = "" }: {
+  label: string; question: string; confirmLabel: string;
+  onConfirm: () => void; className?: string;
+}) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) {
+    return (
+      <button className={`btn ${className}`} onClick={() => setAsking(true)}>
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border
+                     border-bad/40 bg-bad-soft px-2 py-1">
+      <span className="text-[11.5px] leading-snug text-bad">{question}</span>
+      <button className="btn btn-sm border-bad/40 text-bad hover:bg-bad/10"
+              onClick={() => { setAsking(false); onConfirm(); }}>
+        {confirmLabel}
+      </button>
+      <button className="btn btn-sm" onClick={() => setAsking(false)}>Keep</button>
     </span>
   );
 }
+
 
 export function Section({ title, info, right, children }: {
   title: string; info?: ReactNode; right?: ReactNode; children: ReactNode;
@@ -136,7 +217,7 @@ export function Empty({ children }: { children: ReactNode }) {
 }
 
 /** A searchable picker that stays open on the keyboard. */
-export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, query, onQuery, hint }: {
+export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, query, onQuery, hint, locked }: {
   value: string;
   items: T[];
   keyOf: (t: T) => string;
@@ -146,6 +227,7 @@ export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, que
   query: string;
   onQuery: (q: string) => void;
   hint?: ReactNode;
+  locked?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -162,11 +244,12 @@ export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, que
       <input
         className="field"
         placeholder={placeholder}
-        value={open ? query : value}
-        onFocus={() => { setOpen(true); onQuery(""); }}
+        disabled={locked}
+        value={open && !locked ? query : value}
+        onFocus={() => { if (!locked) { setOpen(true); onQuery(""); } }}
         onChange={(e) => { onQuery(e.target.value); setOpen(true); }}
       />
-      {open && (
+      {open && !locked && (
         <div className="absolute z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-md
                         border border-line bg-panel py-1 shadow-xl scroll">
           {hint && <div className="px-2.5 py-1.5 text-[11px] text-ink-faint">{hint}</div>}

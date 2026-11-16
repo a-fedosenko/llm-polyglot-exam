@@ -3,6 +3,12 @@ import { api, type Proposal } from "../api";
 import type { LanguageRow, ModelRow, TestType } from "../types";
 import { Badge, Combo, Info } from "./ui";
 
+//: Mirrors `MIN_ATTESTORS` / `MAX_ATTESTORS` in the engine, which is where the
+//: rule is enforced. Here it only shapes the controls; the page is not the
+//: boundary and must not be the only thing holding the line.
+const MIN_PANEL = 1;
+const MAX_PANEL = 3;
+
 export interface Setup {
   test_type: TestType;
   tag: string;
@@ -31,10 +37,15 @@ export interface Setup {
  * They used to be set once in an env file and never seen again, which is how a
  * run comes to be graded by something nobody remembers choosing. They are a
  * per-run choice now, proposed rather than defaulted, and always on screen. */
-export function SetupBar({ onStart, busy, disabled }: {
+export function SetupBar({ onStart, busy, disabled, locked }: {
   onStart: (s: Setup) => void;
   busy: boolean;
   disabled?: string | null;
+  /** Set while a run is open. Every control here describes the run that is
+   *  already in flight, so changing one would make the bar disagree with the
+   *  steps on screen — switching the test type did not switch the test, it
+   *  just made the page lie about what it was showing. */
+  locked?: string | null;
 }) {
   const [test, setTest] = useState<TestType>("capability");
   const [mode, setMode] = useState<"manual" | "auto">("manual");
@@ -72,6 +83,9 @@ export function SetupBar({ onStart, busy, disabled }: {
       if (r.propose && !touched) {
         setJudge(r.propose.judge ?? "");
         setReaders(r.propose.backtranslator_panel);
+        // Deliberately not proposed. A capability run's reader is one or two
+        // calls; a control panel is five per model, and a pre-ticked panel is
+        // a spend nobody chose.
         setAttestors([]);
       }
     }).catch(() => {});
@@ -110,6 +124,10 @@ export function SetupBar({ onStart, busy, disabled }: {
     : test === "capability" && !judge ? "Pick a judge — a verdict is only comparable to one graded by the same judge."
     : test === "capability" && !readers.length ? "Pick at least one reader."
     : test === "dialect" && varieties.length !== 2 ? "Pick exactly two varieties to contrast."
+    : test === "dialect" && !attestors.length
+      ? `Pick ${MIN_PANEL}–${MAX_PANEL} control models. Each costs three control calls and two attestations.`
+    : test === "dialect" && attestors.length > MAX_PANEL
+      ? `At most ${MAX_PANEL} control models — ${attestors.length} selected.`
     : null;
 
   const start = () => onStart({
@@ -122,12 +140,13 @@ export function SetupBar({ onStart, busy, disabled }: {
     neutral_tag: test === "dialect" ? detail?.umbrella ?? undefined : undefined,
   });
 
-  const choose = (fn: () => void) => { setTouched(true); fn(); };
+  const choose = (fn: () => void) => { if (!locked) { setTouched(true); fn(); } };
 
   return (
     <div className="border-b border-line bg-panel">
       <div className="flex flex-wrap items-end gap-3 px-4 py-2.5">
-        <Segment value={test} onChange={(v) => { setTest(v as TestType); setTag(""); }}
+        <Segment value={test} locked={!!locked}
+                 onChange={(v) => { setTest(v as TestType); setTag(""); }}
                  label="Test"
                  info={<>
                    <b>Language capability</b> asks whether the model can write the
@@ -149,6 +168,7 @@ export function SetupBar({ onStart, busy, disabled }: {
             placeholder={test === "dialect"
               ? "a variety with a named sibling…" : "search locales…"}
             items={langs} keyOf={(l) => l.tag} onPick={(l) => setTag(l.tag)}
+            locked={!!locked}
             hint={test === "dialect"
               ? "Only tags a dialect test can answer: a named variety with at least one named sibling to contrast it against."
               : undefined}
@@ -162,13 +182,14 @@ export function SetupBar({ onStart, busy, disabled }: {
           />
         </div>
 
-        <ModelPick label="Model under test" models={models}
+        <ModelPick label="Model under test" models={models} locked={!!locked}
                    value={engine} onChange={(v) => { setTouched(false); setEngine(v); }}
                    info={<>Every other choice is made relative to this one: a model
                      never reads back or grades its own family's output, because
                      that measures self-consistency and reports it as agreement.</>} />
 
-        <Segment value={mode} onChange={(v) => setMode(v as any)} label="Mode"
+        <Segment value={mode} locked={!!locked}
+                 onChange={(v) => setMode(v as any)} label="Mode"
                  info={<>
                    <b>Manual</b> stops before every paid call so you can read the
                    prompt and change it. <b>Auto</b> runs the same steps straight
@@ -176,8 +197,9 @@ export function SetupBar({ onStart, busy, disabled }: {
                  </>}
                  options={[["manual", "Manual"], ["auto", "Auto"]]} />
 
-        <button className="btn btn-primary" disabled={!!missing || busy || !!disabled}
-                onClick={start} title={disabled ?? missing ?? undefined}>
+        <button className="btn btn-primary"
+                disabled={!!missing || busy || !!disabled || !!locked}
+                onClick={start} title={locked ?? disabled ?? missing ?? undefined}>
           {busy ? "Starting…" : "Start test"}
         </button>
       </div>
@@ -202,6 +224,7 @@ export function SetupBar({ onStart, busy, disabled }: {
           <>
             <Inline label="judge">
               <Pick models={eligible} binding={binding} value={judge}
+                    locked={!!locked}
                     onChange={(v) => choose(() => setJudge(v))} />
             </Inline>
             <Inline label="readers">
@@ -217,21 +240,21 @@ export function SetupBar({ onStart, busy, disabled }: {
             </Inline>
           </>
         ) : (
-          <Inline label="control models">
+          <Inline label={`control models (${attestors.length}/${MAX_PANEL})`}>
             <span className="flex flex-wrap items-center gap-1">
-              {eligible.map((m) => (
-                <Toggle key={m.id} on={!attestors.length || attestors.includes(m.id)}
-                        label={m.id}
-                        onClick={() => choose(() => setAttestors(
-                          attestors.includes(m.id)
-                            ? attestors.filter((a) => a !== m.id)
-                            : [...(attestors.length ? attestors
-                                   : eligible.map((x) => x.id)), m.id]))} />
-              ))}
+              {eligible.map((m) => {
+                const on = attestors.includes(m.id);
+                const full = !on && attestors.length >= MAX_PANEL;
+                return (
+                  <Toggle key={m.id} on={on} label={m.id} dim={full}
+                          onClick={() => choose(() => setAttestors(
+                            on ? attestors.filter((a) => a !== m.id)
+                               : full ? attestors : [...attestors, m.id]))} />
+                );
+              })}
               {!attestors.length && (
-                <span className="text-[11px] text-ink-faint">
-                  all eligible — the controls narrow them, which is the only
-                  narrowing that is evidence
+                <span className="text-[11px] text-warn">
+                  none selected — pick {MIN_PANEL}–{MAX_PANEL}
                 </span>
               )}
             </span>
@@ -277,18 +300,21 @@ export function SetupBar({ onStart, busy, disabled }: {
           {family.map((f: any) => (
             <Toggle key={f.tag} on={varieties.includes(f.tag)}
                     label={f.tag + (f.region ? ` · ${f.region}` : "")}
-                    onClick={() => setVarieties(varieties.includes(f.tag)
-                      ? varieties.filter((v) => v !== f.tag)
-                      : [...varieties, f.tag].slice(-2))} />
+                    onClick={() => { if (!locked) setVarieties(
+                      varieties.includes(f.tag)
+                        ? varieties.filter((v) => v !== f.tag)
+                        : [...varieties, f.tag].slice(-2)); }} />
           ))}
         </div>
       )}
 
-      {(known || disabled || missing) && (
+      {(known || disabled || (missing && !locked) || locked) && (
         <div className="flex flex-wrap items-center gap-2 border-t border-line-soft
                         px-4 py-1.5 text-[12px]">
-          {disabled && <span className="text-bad">{disabled}</span>}
-          {!disabled && missing && <span className="text-ink-faint">{missing}</span>}
+          {locked && <span className="text-ink-faint">{locked}</span>}
+          {!locked && disabled && <span className="text-bad">{disabled}</span>}
+          {!locked && !disabled && missing &&
+            <span className="text-ink-faint">{missing}</span>}
           {known && (
             <>
               <Badge tone={known.approved ? "ok" : "warn"}>
@@ -320,29 +346,33 @@ function Inline({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-function Toggle({ on, label, onClick }: {
-  on: boolean; label: string; onClick: () => void;
+function Toggle({ on, label, onClick, dim }: {
+  on: boolean; label: string; onClick: () => void; dim?: boolean;
 }) {
   return (
     <button onClick={onClick}
+      title={dim ? "The panel is full — deselect one first." : undefined}
       className={`chip font-mono transition-colors ${
         on ? "border-accent bg-accent-soft text-accent"
+           : dim ? "opacity-25"
            : "opacity-60 hover:opacity-100"}`}>
       {label}
     </button>
   );
 }
 
-function Pick({ models, binding, value, onChange }: {
+function Pick({ models, binding, value, onChange, locked }: {
   models: ModelRow[]; binding: boolean; value: string;
-  onChange: (v: string) => void;
+  onChange: (v: string) => void; locked?: boolean;
 }) {
   if (!models.length && !binding) {
     return <input className="field max-w-56 font-mono text-[12px]" value={value}
+                  disabled={locked}
                   placeholder="model id" onChange={(e) => onChange(e.target.value)} />;
   }
   return (
     <select className="field max-w-56 font-mono text-[12px]" value={value}
+            disabled={locked}
             onChange={(e) => onChange(e.target.value)}>
       <option value="">choose…</option>
       {!models.some((m) => m.id === value) && value &&
@@ -352,15 +382,16 @@ function Pick({ models, binding, value, onChange }: {
   );
 }
 
-function ModelPick({ label, models, value, onChange, info }: {
+function ModelPick({ label, models, value, onChange, info, locked }: {
   label: string; models: ModelRow[]; value: string;
-  onChange: (v: string) => void; info?: React.ReactNode;
+  onChange: (v: string) => void; info?: React.ReactNode; locked?: boolean;
 }) {
   return (
     <div className="min-w-48">
       <label className="label flex items-center gap-1">{label}{info && <Info>{info}</Info>}</label>
       {models.length ? (
-        <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
+        <select className="field" value={value} disabled={locked}
+                onChange={(e) => onChange(e.target.value)}>
           {!models.some((m) => m.id === value) && value &&
             <option value={value}>{value}</option>}
           {models.map((m) => (
@@ -369,24 +400,27 @@ function ModelPick({ label, models, value, onChange, info }: {
         </select>
       ) : (
         <input className="field" value={value} placeholder="model id"
-               onChange={(e) => onChange(e.target.value)} />
+               disabled={locked} onChange={(e) => onChange(e.target.value)} />
       )}
     </div>
   );
 }
 
-function Segment({ value, onChange, options, label, info }: {
+function Segment({ value, onChange, options, label, info, locked }: {
   value: string; onChange: (v: string) => void; options: [string, string][];
-  label: string; info?: React.ReactNode;
+  label: string; info?: React.ReactNode; locked?: boolean;
 }) {
   return (
     <div>
       <label className="label flex items-center gap-1">{label}{info && <Info>{info}</Info>}</label>
-      <div className="flex rounded-md border border-line p-0.5">
+      <div className={`flex rounded-md border border-line p-0.5 ${
+        locked ? "opacity-50" : ""}`}>
         {options.map(([v, l]) => (
-          <button key={v} onClick={() => onChange(v)}
+          <button key={v} disabled={locked} onClick={() => onChange(v)}
+            title={locked ? "A run is open — abort it to change this." : undefined}
             className={`rounded px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
-              value === v ? "bg-accent text-white" : "text-ink-soft hover:bg-line-soft"}`}>
+              value === v ? "bg-accent text-white"
+                : locked ? "text-ink-faint" : "text-ink-soft hover:bg-line-soft"}`}>
             {l}
           </button>
         ))}

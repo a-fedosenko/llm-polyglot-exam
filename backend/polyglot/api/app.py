@@ -273,8 +273,13 @@ def get_run(run_id: str) -> dict:
         # A run from a previous process is a record, not a session. Saying so is
         # the honest answer: it can be read, adjudicated and approved, and it
         # cannot be continued.
+        #
+        # `interrupted` rather than the stored `running`: the row was written by
+        # a process that is gone, and a page that reconnected to it would show a
+        # "Run next step" button that can never work.
+        status = "interrupted" if row.status == "running" else row.status
         return {
-            "id": row.id, "status": row.status, "mode": row.mode,
+            "id": row.id, "status": status, "mode": row.mode,
             "test_type": row.test_type, "tag": row.tag, "engine": row.engine,
             "live": False, "error": row.error,
             "prompt_edited": row.prompt_edited, "plan": row.plan,

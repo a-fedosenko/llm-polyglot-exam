@@ -210,3 +210,26 @@ def test_an_embedding_model_is_not_offered_as_an_instrument():
 
     assert _is_chat("openai-gpt-4o")
     assert not _is_chat("openai-text-embedding-3-small")
+
+
+def test_a_dialect_run_requires_between_one_and_three_control_models(client):
+    """Never "all of them" by default.
+
+    Each control model costs three control calls plus two attestations, so the
+    convenient gesture — leave it blank, use everything — quietly turns a
+    15-call run into a 65-call one against the operator's own key.
+    """
+    base = {"test_type": "dialect", "tag": "pt-br", "engine": "acme-a",
+            "varieties": ["pt-br", "pt-pt"]}
+
+    r = client.post("/api/runs", json=base)
+    assert r.status_code == 400
+    assert "between 1 and 3 control models" in r.json()["detail"]
+
+    r = client.post("/api/runs", json={**base, "attestors": [
+        "b-one", "c-one", "d-one", "e-one"]})
+    assert r.status_code == 400
+    assert "got 4" in r.json()["detail"]
+
+    r = client.post("/api/runs", json={**base, "attestors": ["other-b"]})
+    assert r.status_code == 201, r.text
