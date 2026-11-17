@@ -88,6 +88,9 @@ export interface ItemDetail {
   verdicts: string[] | null;
   recall: number | null;
   error: string | null;
+  /** Parameters the provider refused on this call, in words. One of them —
+   *  an explicit temperature — changes what the measurement means. */
+  adjusted?: string[];
 }
 
 export interface RunSnapshot {

@@ -1,5 +1,6 @@
 import type { Step } from "../types";
-import { Badge, Collapse, Info, KeyVal, Section, Text, toneText } from "./ui";
+import { Badge, Collapse, Confirm, Info, KeyVal, Section, Text, toneSoft,
+         toneText } from "./ui";
 
 /** One step's full evidence, and nothing else on screen.
  *
@@ -14,14 +15,21 @@ import { Badge, Collapse, Info, KeyVal, Section, Text, toneText } from "./ui";
  * tests — two marker defects, a duplicate-row bug, and a table that had Swahili
  * at chrF++ 79.8 sitting in the "did not write Swahili" bucket. */
 
-export function Stage({ step, onOverrideFact, onOverrideAttestor }: {
+export function Stage({ step, adjudication, onOverrideFact, onOverrideAttestor,
+                       onRuleOnReader }: {
   step: Step;
+  /** Corrections the operator has already made on this run, so a fact that was
+   *  overruled shows as overruled rather than as whatever the judge said. */
+  adjudication?: any;
   onOverrideFact?: (specId: string, index: number, verdict: string) => void;
   onOverrideAttestor?: (probe: string, attestor: string, correct: boolean) => void;
+  /** Present only on the latest step of a live run: the operator's ruling on
+   *  the reader changes what happens next, so it cannot be made from history. */
+  onRuleOnReader?: (decision: string, why?: string) => void;
 }) {
   const r = step.result ?? {};
   return (
-    <div className="scroll h-full p-4">
+    <div className="scroll min-h-0 flex-1 p-4">
       <header className="mb-3">
         <div className="flex items-center gap-2">
           <h2 className="text-[15px] font-semibold text-ink">{step.title}</h2>
@@ -40,8 +48,10 @@ export function Stage({ step, onOverrideFact, onOverrideAttestor }: {
 
       <div className="space-y-4">
         <Body step={step} r={r}
+              adjudication={adjudication}
               onOverrideFact={onOverrideFact}
-              onOverrideAttestor={onOverrideAttestor} />
+              onOverrideAttestor={onOverrideAttestor}
+              onRuleOnReader={onRuleOnReader} />
         <Sent step={step} />
       </div>
     </div>
@@ -69,12 +79,14 @@ function Sent({ step }: { step: Step }) {
   );
 }
 
-function Body({ step, r, onOverrideFact, onOverrideAttestor }: any) {
+function Body({ step, r, adjudication, onOverrideFact, onOverrideAttestor,
+                onRuleOnReader }: any) {
   switch (step.kind) {
     case "generate":
     case "extra-item":
     case "judge":
-      return <ItemStep r={r} onOverrideFact={onOverrideFact} />;
+      return <ItemStep r={r} adjudication={adjudication}
+                       onOverrideFact={onOverrideFact} />;
     case "designator-trial":
       return <TrialStep r={r} />;
     case "designator-chosen":
@@ -82,7 +94,11 @@ function Body({ step, r, onOverrideFact, onOverrideAttestor }: any) {
     case "deterministic-negative":
       return <DeterministicStep r={r} />;
     case "qualification":
-      return <QualificationStep r={r} />;
+      return <QualificationStep r={r} onRule={onRuleOnReader} />;
+    case "reader-override":
+      return <ReaderOverrideStep r={r} />;
+    case "no-answer":
+      return <NoAnswerStep r={r} />;
     case "unverified":
       return <UnverifiedStep r={r} />;
     case "score":
@@ -110,15 +126,54 @@ function Body({ step, r, onOverrideFact, onOverrideAttestor }: any) {
 
 // -- capability ---------------------------------------------------------------
 
-function ItemStep({ r, onOverrideFact }: any) {
+const VERDICTS = ["present", "missing", "contradicted"] as const;
+const VERDICT_TONE: Record<string, string> = {
+  present: "ok", contradicted: "bad", missing: "warn",
+};
+
+function ItemStep({ r, adjudication, onOverrideFact }: any) {
+  // What the operator has already said about this item, so a fact they
+  // overruled reads as overruled instead of reverting to the judge's answer
+  // the next time the step is opened.
+  const corrected: Record<number, string> = {};
+  for (const a of adjudication?.applied ?? [])
+    if (a.spec_id === r.spec_id) corrected[a.index] = a.now;
+
   return (
     <>
+      {r.gate === "no_answer" ? (
+        <Section
+          title="The call did not come back"
+          info="An HTTP error, a timeout, or a model that spent its whole budget before emitting a token. None of it is evidence about the language: a failure of the instrument must never be published as a failure of the thing being measured, so this item is void — it neither passes nor counts against the model."
+          right={<Badge tone="warn">void — not the model's answer</Badge>}
+        >
+          <div className="rounded-md border border-bad/30 bg-bad-soft p-3">
+            <p className="text-[12.5px] font-medium text-bad">
+              {r.error ? "The endpoint answered with an error."
+                       : "The endpoint returned no text."}
+            </p>
+            <pre className="prose-text mt-2 whitespace-pre-wrap text-[12px] text-bad/90">
+              {r.error ?? r.gate_detail ?? "—"}
+            </pre>
+          </div>
+        </Section>
+      ) : (
       <Section
         title={`What the model wrote — ${r.designator ?? ""}`}
         info="The model's own words, untouched. Reading this is how nearly every real defect in this method was found; a verdict you can only check by opening a log file is a verdict most people take on trust."
         right={<Badge tone={r.gate === "pass" ? "ok" : "bad"}>gate: {r.gate}</Badge>}
       >
         <Text>{r.generation ?? r.error ?? "—"}</Text>
+        {(r.adjusted ?? []).length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {r.adjusted.map((a: string, i: number) => (
+              <li key={i} className="rounded-md border border-warn/30 bg-warn-soft
+                                     px-2.5 py-1.5 text-[11.5px] leading-relaxed text-warn">
+                <b>The provider refused a parameter.</b> {a}
+              </li>
+            ))}
+          </ul>
+        )}
         {(r.gate_detail || r.lid) && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-ink-faint">
             {r.gate_detail && <span>{r.gate_detail}</span>}
@@ -134,6 +189,7 @@ function ItemStep({ r, onOverrideFact }: any) {
           </div>
         )}
       </Section>
+      )}
 
       {r.back_translation && (
         <Section
@@ -156,34 +212,55 @@ function ItemStep({ r, onOverrideFact }: any) {
         >
           <ul className="divide-y divide-line rounded-md border border-line">
             {r.facts.map((f: string, i: number) => {
-              const v = r.verdicts?.[i];
-              const tone = v === "present" ? "ok" : v === "contradicted" ? "bad" : "warn";
+              const judged = r.verdicts?.[i];
+              const mine = corrected[i];
+              const v = mine ?? judged;
               return (
                 <li key={i} className="flex items-start gap-2.5 px-2.5 py-2">
-                  <span className={`mt-0.5 shrink-0 text-[11px] font-semibold ${toneText[v ? tone : ""]}`}>
-                    {v ?? "—"}
+                  <span className="min-w-0 flex-1 text-[13px] text-ink">
+                    {f}
+                    {mine && (
+                      <span className="ml-2 text-[11px] text-warn">
+                        you overruled this — the judge said {judged}
+                      </span>
+                    )}
                   </span>
-                  <span className="min-w-0 flex-1 text-[13px] text-ink">{f}</span>
-                  {v && onOverrideFact && (
-                    <span className="flex shrink-0 gap-1">
-                      {["present", "missing", "contradicted"]
-                        .filter((x) => x !== v)
-                        .map((x) => (
-                          <button
-                            key={x}
-                            className="btn btn-sm"
-                            title={`Say this fact is ${x}, and see what the run would have scored. The measurement is not changed.`}
-                            onClick={() => onOverrideFact(r.spec_id, i, x)}
-                          >
-                            {x}
-                          </button>
-                        ))}
+                  {judged && onOverrideFact ? (
+                    <span className="flex shrink-0 gap-1" role="group"
+                          aria-label="What this fact really is">
+                      {VERDICTS.map((x) => (
+                        <button
+                          key={x}
+                          className={`btn btn-sm ${x === v
+                            ? `${toneSoft[VERDICT_TONE[x]]} font-semibold`
+                            : "text-ink-faint"}`}
+                          aria-pressed={x === v}
+                          title={x === judged
+                            ? `What the judge answered. Click to put it back, if you had overruled it.`
+                            : `Say this fact is ${x}, and see what the run would have scored. The measurement itself is never changed.`}
+                          onClick={() => onOverrideFact(r.spec_id, i, x)}
+                        >
+                          {x}
+                        </button>
+                      ))}
+                    </span>
+                  ) : (
+                    <span className={`mt-0.5 shrink-0 text-[11px] font-semibold
+                                      ${toneText[judged ? VERDICT_TONE[judged] : ""]}`}>
+                      {judged ?? "—"}
                     </span>
                   )}
                 </li>
               );
             })}
           </ul>
+          {Object.keys(corrected).length > 0 && (
+            <p className="mt-2 text-[11.5px] leading-relaxed text-warn">
+              Your corrections sit beside the measurement and never replace it:
+              the run still scores what the judge said, and the verdict panel
+              shows what it would have scored had the judge answered your way.
+            </p>
+          )}
         </Section>
       )}
     </>
@@ -256,7 +333,8 @@ function DeterministicStep({ r }: any) {
   );
 }
 
-function QualificationStep({ r }: any) {
+function QualificationStep({ r, onRule }: any) {
+  const evidence: any[] = r.evidence ?? [];
   return (
     <>
       <Section title="Which reader, and why"
@@ -270,10 +348,54 @@ function QualificationStep({ r }: any) {
                 chrF++ {r.score?.toFixed(1)}{r.threshold != null && ` · threshold ${r.threshold}`}
               </span>
             )}
+            {r.kind === "facts" && r.score != null && (
+              <span className="text-[12px] text-ink-soft tabular-nums">
+                fact recall {(r.score * 100).toFixed(0)}%
+                {r.threshold != null && ` · threshold ${(r.threshold * 100).toFixed(0)}%`}
+              </span>
+            )}
           </div>
           {r.detail && <p className="mt-2 text-[12.5px] text-ink-soft">{r.detail}</p>}
+          {r.rejected?.length > 0 && (
+            <p className="mt-2 text-[12px] text-warn">
+              Not tried: {r.rejected.join(", ")} — you threw {r.rejected.length > 1
+                ? "them" : "it"} out earlier in this run.
+            </p>
+          )}
         </div>
       </Section>
+
+      <ReaderTranscript evidence={evidence} fromCache={!!r.from_cache} />
+
+      {onRule && (
+        <Section title="Do you agree?"
+                 info="The thresholds are calibrated against two real cases — a fabricating reader at chrF++ 10.5, a faithful one at 81.9 — and are simply wrong in the middle, where 90% of one metric's disagreements with fact recall turned out to be adequate translations. A person reading the transcript above can tell which of the two they are looking at; the number cannot. A run you rule on is kept in full and never becomes a stored verdict.">
+          <div className="flex flex-wrap items-center gap-2">
+            {!r.trustworthy && (
+              <Confirm
+                label="Keep this reader anyway"
+                question="Keep a reader the method did not qualify? The run continues and is never promoted to a stored verdict."
+                confirmLabel="Keep it"
+                onConfirm={() => onRule("accept",
+                  "the transcript shows the language was read, not invented")}
+              />
+            )}
+            <Confirm
+              label="Throw this reader out"
+              question="Throw this reader out? The next reader on the panel is tried instead, and this one is not used again on this run."
+              confirmLabel="Throw it out"
+              onConfirm={() => onRule("reject",
+                "the transcript shows an invented reading")}
+            />
+            {r.from_cache && (
+              <button className="btn" onClick={() => onRule("recheck")}
+                      title="Pay for the check again instead of taking it from the cache — the only way to see what this reader actually answers for this language.">
+                Check it again, for real
+              </button>
+            )}
+          </div>
+        </Section>
+      )}
 
       {r.attempts?.length > 1 && (
         <Collapse label="Every reader that was tried" count={r.attempts.length}>
@@ -292,6 +414,147 @@ function QualificationStep({ r }: any) {
         </Collapse>
       )}
     </>
+  );
+}
+
+/** What the reader was given, and what it gave back.
+ *
+ * The one thing this step was missing. It said "qualified at 73.1" and showed
+ * a placeholder where the control text belongs, which asks the operator to
+ * take the instrument's word for the instrument — on the exact step whose
+ * whole purpose is that a model which cannot read a language does not refuse,
+ * it invents. Fabrication is obvious to a person reading two paragraphs side
+ * by side and invisible in a single number. */
+function ReaderTranscript({ evidence, fromCache }: {
+  evidence: any[]; fromCache: boolean;
+}) {
+  if (!evidence.length) {
+    return (
+      <Section title="What it was given, and what it answered">
+        <p className="rounded-md border border-line bg-surface p-3 text-[12.5px]
+                      leading-relaxed text-ink-soft">
+          {fromCache
+            ? "Nothing was sent: this reader was qualified for this language on "
+              + "an earlier run and the answer was taken from the cache, which "
+              + "keeps the verdict and not the transcript. Check it again below "
+              + "to see what it actually answers."
+            : "No control text was put to a reader on this step."}
+        </p>
+      </Section>
+    );
+  }
+  return (
+    <Section
+      title="What it was given, and what it answered"
+      info="Control text whose meaning is already known, the reader's rendering of it, and the known reference the rendering was scored against. Read the two columns against each other: a reader that cannot read the language produces fluent, confident text with nothing of the original in it."
+      right={<span className="text-[11px] text-ink-faint">
+        {evidence.length} control item{evidence.length > 1 ? "s" : ""}
+      </span>}
+    >
+      <div className="space-y-2">
+        {evidence.map((e, i) => (
+          <div key={i} className="rounded-md border border-line">
+            <div className="flex items-center gap-2 border-b border-line px-2.5 py-1.5">
+              <span className="chip">control {i + 1}</span>
+              {e.score != null && (
+                <span className={`text-[12px] tabular-nums ${
+                  e.threshold != null && e.score >= e.threshold ? "text-ok" : "text-bad"}`}>
+                  {e.metric ?? "score"} {e.metric === "fact recall"
+                    ? `${(e.score * 100).toFixed(0)}%` : e.score.toFixed(1)}
+                </span>
+              )}
+              {e.error && <span className="text-[12px] text-bad">{e.error}</span>}
+            </div>
+            <div className="grid gap-2 p-2.5 md:grid-cols-2">
+              <div>
+                <div className="label">known text, in the language</div>
+                <Text className="text-ink-soft">{e.control}</Text>
+              </div>
+              <div>
+                <div className="label">what the reader made of it</div>
+                <Text>{e.got ?? "—"}</Text>
+              </div>
+              {e.expected && (
+                <div className="md:col-span-2">
+                  <div className="label">what it should have said</div>
+                  <Text className="text-ink-soft">{e.expected}</Text>
+                </div>
+              )}
+              {e.facts?.length > 0 && (
+                <div className="md:col-span-2">
+                  <div className="label">facts the reading had to recover</div>
+                  <ul className="divide-y divide-line rounded-md border border-line">
+                    {e.facts.map((f: string, j: number) => {
+                      const v = e.verdicts?.[j];
+                      return (
+                        <li key={j} className="flex items-start gap-2.5 px-2.5 py-1.5">
+                          <span className={`shrink-0 text-[11px] font-semibold ${
+                            toneText[v === "present" ? "ok"
+                                     : v === "contradicted" ? "bad" : "warn"]}`}>
+                            {v ?? "—"}
+                          </span>
+                          <span className="text-[12.5px] text-ink">{f}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function ReaderOverrideStep({ r }: any) {
+  const said: Record<string, string> = {
+    accept: "kept over the method's threshold",
+    reject: "thrown out and not used again on this run",
+    recheck: "to be checked again, ignoring the cache",
+  };
+  return (
+    <Section title="Your ruling on the reader"
+             info="Qualification is a measurement, and a measurement nobody can overrule is an authority. This run is kept in full and readable, and it never becomes a stored verdict: it measured an instrument the method did not certify.">
+      <div className="card p-4">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[14px] text-ink">{r.backtranslator}</span>
+          <Badge tone="warn">{said[r.decision] ?? r.decision}</Badge>
+        </div>
+        {r.was && (
+          <p className="mt-2 text-[12.5px] text-ink-soft">
+            The method had it at <b>{r.was.status}</b>
+            {r.was.score != null && <> · {r.was.kind || "score"} {r.was.score}</>}
+            {r.was.detail ? ` — ${r.was.detail}` : "."}
+          </p>
+        )}
+        {r.why && <p className="mt-1.5 text-[12.5px] text-ink-soft">Your reason: {r.why}</p>}
+      </div>
+    </Section>
+  );
+}
+
+function NoAnswerStep({ r }: any) {
+  return (
+    <Section title="Nothing was measured">
+      <div className="rounded-md border border-bad/30 bg-bad-soft p-3 text-[13px] text-bad">
+        <p className="font-medium">
+          {r.engine} returned nothing on {r.attempts} attempt
+          {r.attempts === 1 ? "" : "s"}.
+        </p>
+        <p className="mt-1.5 opacity-90">
+          This is a statement about the endpoint, not about the model: silence
+          is not a refusal, and a run that scored it would publish a failure of
+          the instrument as a failure of the language. No verdict is stored.
+          Fix the endpoint and start the test again.
+        </p>
+        {(r.errors ?? []).map((e: string, i: number) => (
+          <pre key={i} className="prose-text mt-2 whitespace-pre-wrap
+                                  text-[12px] opacity-90">{e}</pre>
+        ))}
+      </div>
+    </Section>
   );
 }
 

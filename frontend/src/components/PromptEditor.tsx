@@ -13,21 +13,23 @@ import { Badge, Info } from "./ui";
  * Some steps refuse an edit, and the refusal is the point. A control's answer
  * is certain *by construction*; an edited control is no longer a control, and a
  * rewritten qualification uncertifies the reader it was meant to certify. */
-export function PromptEditor({ planned, onRun, onRunEdited, busy }: {
+export function PromptEditor({ planned, calls, onCalls }: {
   planned: Planned;
-  onRun: () => void;
-  onRunEdited: (calls: Call[]) => void;
-  busy: boolean;
+  /** What will actually be sent: the plan, or the operator's rewrite of it.
+   *  Held by the page rather than here, because the button that sends it is
+   *  not in this panel — there is one run button in this tool and it lives
+   *  beside the run's own counters. */
+  calls: Call[];
+  onCalls: (calls: Call[]) => void;
 }) {
-  const [calls, setCalls] = useState<Call[]>(planned.calls);
   const [editing, setEditing] = useState(false);
 
-  useEffect(() => { setCalls(planned.calls); setEditing(false); }, [planned]);
+  useEffect(() => { setEditing(false); }, [planned]);
 
   const dirty = JSON.stringify(calls) !== JSON.stringify(planned.calls);
 
   const patch = (i: number, field: "system" | "user", v: string) =>
-    setCalls(calls.map((c, j) => (j === i ? { ...c, [field]: v } : c)));
+    onCalls(calls.map((c, j) => (j === i ? { ...c, [field]: v } : c)));
 
   return (
     <div className="flex h-full flex-col">
@@ -64,7 +66,7 @@ export function PromptEditor({ planned, onRun, onRunEdited, busy }: {
                 </span>
               )}
               {dirty && (
-                <button className="btn btn-sm" onClick={() => setCalls(planned.calls)}>
+                <button className="btn btn-sm" onClick={() => onCalls(planned.calls)}>
                   Revert
                 </button>
               )}
@@ -93,22 +95,14 @@ export function PromptEditor({ planned, onRun, onRunEdited, busy }: {
         )}
       </div>
 
-      <footer className="flex items-center gap-2 border-t border-line px-4 py-2.5">
-        {dirty && (
-          <span className="text-[11px] text-warn">
-            A rewritten prompt measures a different instrument — this run will be
-            kept in full and will not become a stored verdict.
-          </span>
-        )}
-        <button
-          className="btn btn-primary ml-auto"
-          disabled={busy}
-          onClick={() => (dirty ? onRunEdited(calls) : onRun())}
-        >
-          {busy ? "Running…" : dirty ? "Run with my prompt" : "Run this step"}
-          <kbd className="ml-1 rounded border border-white/30 px-1 text-[10px]">↵</kbd>
-        </button>
-      </footer>
+      {dirty && (
+        <footer className="border-t border-warn/30 bg-warn-soft px-4 py-2.5
+                           text-[11.5px] leading-relaxed text-warn">
+          <b>This is your prompt, not the method's.</b> It is what the run button
+          will send, and a rewritten prompt measures a different instrument — the
+          run is kept in full and will not become a stored verdict.
+        </footer>
+      )}
     </div>
   );
 }

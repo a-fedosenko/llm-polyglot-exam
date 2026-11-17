@@ -28,6 +28,10 @@ class ItemOutcome:
     back_translation: str | None = None
     judgement: Judgement | None = None
     error: str | None = None
+    #: Parameters the provider refused on this call, in words. Kept on the item
+    #: because one of them changes what the measurement means: a model that
+    #: will not take `temperature: 0` was sampled at its own default.
+    adjusted: tuple[str, ...] = ()
     #: The fact checklist this item is graded against, carried on the item so a
     #: reader can see which fact a verdict refers to. Index-aligned with
     #: `judgement.verdicts`.
@@ -84,7 +88,8 @@ def generate_and_gate(*, client: OpenAICompatClient, engine: str, lang: Language
     # would make a run look as if the model had been asked almost nothing.
     shown = f"{system}\n\n--- user ---\n\n{user}"
     corpus.write(Record("generation", engine, lang.tag, spec.id, designator, shown,
-                        gen.text, gen.error, gen.usage, gen.latency_s))
+                        gen.text, gen.error, gen.usage, gen.latency_s,
+                        meta={"adjusted": list(gen.adjusted)} if gen.adjusted else {}))
     # The copy check compares the output against everything the model was shown,
     # so it has to see both messages: an output echoing the system half is still
     # an echo, and would otherwise pass as original text.
@@ -92,7 +97,8 @@ def generate_and_gate(*, client: OpenAICompatClient, engine: str, lang: Language
                       expect_script=lang.script, relatives=relatives, accept_lang=accept,
                       abstain_lang=abstain)
     return ItemOutcome(spec.id, designator, gen.text, gate, error=gen.error,
-                       facts=list(spec.facts), prompt=shown)
+                       facts=list(spec.facts), prompt=shown,
+                       adjusted=tuple(gen.adjusted))
 
 
 def judge_item(item: ItemOutcome, *, client: OpenAICompatClient, judge_model: str,

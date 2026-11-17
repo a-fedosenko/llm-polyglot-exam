@@ -21,11 +21,17 @@ const PHASE_LABEL: Record<string, string> = {
   attest: "Attestation",
 };
 
-export function StepRail({ steps, next, selected, onSelect, running, onRerun }: {
+export function StepRail({ steps, next, selected, onSelect, onSelectNext, running,
+                          onRerun }: {
   steps: Step[];
   next: Planned | null;
   selected: number | null;
   onSelect: (ordinal: number) => void;
+  /** Takes the stage back to the step that has not been paid for yet. The
+   *  card is the only run-adjacent thing in the rail that is not history, and
+   *  not being able to click it was how a reader got stranded on an old step
+   *  with no way forward but the keyboard. */
+  onSelectNext: () => void;
   running: boolean;
   onRerun: (ordinal: number) => void;
 }) {
@@ -88,7 +94,13 @@ export function StepRail({ steps, next, selected, onSelect, running, onRerun }: 
         ))}
 
         {next && (
-          <div className="mt-2 rounded-md border border-dashed border-line px-2 py-2">
+          <button
+            onClick={onSelectNext}
+            className={`mt-2 w-full rounded-md border border-dashed px-2 py-2
+                        text-left transition-colors ${
+              selected === null ? "border-accent bg-accent-soft"
+                                : "border-line hover:bg-line-soft"}`}
+          >
             <div className="flex items-start gap-2">
               <span className="mt-1.5"><Dot tone="" filled={false} /></span>
               <div className="min-w-0">
@@ -100,7 +112,7 @@ export function StepRail({ steps, next, selected, onSelect, running, onRerun }: 
                 </div>
               </div>
             </div>
-          </div>
+          </button>
         )}
 
         {!next && !running && steps.length > 0 && (

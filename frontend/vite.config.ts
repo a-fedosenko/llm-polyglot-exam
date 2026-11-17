@@ -10,6 +10,14 @@ export default defineConfig({
   build: { outDir: '../backend/static', emptyOutDir: true },
   server: {
     port: 5173,
-    proxy: { '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true } },
+    // Overridable because 8000 is a popular port: another project's container
+    // holding it should mean `POLYGLOT_API=http://127.0.0.1:8010 npm run dev`,
+    // not editing a committed file to develop.
+    proxy: {
+      '/api': {
+        target: process.env.POLYGLOT_API ?? 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
   },
 })

@@ -367,6 +367,33 @@ def rerun(run_id: str, ordinal: int) -> dict:
     return {**out, "next": runner.plan(sess), "status": sess.status}
 
 
+class ReaderRuling(BaseModel):
+    #: accept — keep this reader despite the threshold; reject — throw it out
+    #: and try the next on the panel; recheck — pay for the check again rather
+    #: than take it from the cache.
+    decision: str
+    why: str = ""
+
+
+@app.post("/api/runs/{run_id}/reader")
+def rule_on_reader(run_id: str, body: ReaderRuling) -> dict:
+    """Overrule the qualification of the back-translator.
+
+    The one measurement in the run whose subject is the instrument rather than
+    the model, and the one a person reading the transcript can be righter about
+    than the threshold — the chrF++ cut separates fabrication from faithful
+    reading and is simply wrong in the middle. Any run that took this route is
+    kept in full and never becomes a stored verdict.
+    """
+    try:
+        sess = runner.require(run_id)
+        step = runner.rule_on_reader(sess, body.decision, body.why)
+    except (RunError, ValueError) as e:
+        raise _fail(e) from e
+    return {"step": step, "status": sess.status,
+            "spent": runner._spent(sess), "next": runner.plan(sess)}
+
+
 class PanelBody(BaseModel):
     attestors: list[str]
 

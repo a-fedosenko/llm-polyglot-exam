@@ -33,6 +33,12 @@ class GateVerdict(str, Enum):
     MEMORISED = "memorised"
     TOO_SHORT = "too_short"
     LOW_CONFIDENCE = "low_confidence"
+    #: The call did not come back with anything to gate — an HTTP error, a
+    #: timeout, a reasoning model that spent its whole budget before emitting a
+    #: token. Never evidence about the model: scoring it as a refusal publishes
+    #: a failure of the instrument as a failure of the thing being measured,
+    #: which is the one mistake this project refuses to make.
+    NO_ANSWER = "no_answer"
 
 
 #: Verdicts that are a negative about the model, as opposed to a void item.
@@ -139,8 +145,12 @@ def check(text: str | None, *, prompt: str, expect_lang: str | None,
     """
     checks: dict[str, bool] = {}
 
-    if not text or not text.strip():
-        return GateResult(GateVerdict.REFUSED, detail="empty response", checks=checks)
+    if text is None:
+        return GateResult(GateVerdict.NO_ANSWER, detail="the call returned nothing",
+                          checks=checks)
+    if not text.strip():
+        return GateResult(GateVerdict.NO_ANSWER, detail="empty response",
+                          checks=checks)
 
     stripped = text.strip()
     if REFUSAL_RE.search(stripped):

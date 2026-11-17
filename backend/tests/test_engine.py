@@ -288,3 +288,119 @@ def test_overruling_an_attestor_reverses_its_vote_rather_than_withdrawing_it(
     mine = next(v for v in votes if v["attestor"] == "other-judge-c")
     assert mine["correct"] is False
     assert mine["abstained"] is False
+
+
+# -- the reader, and the operator's right to disagree with it ------------------
+
+def test_the_qualification_preflight_carries_the_control_text(scripted, corpus):
+    """The one step whose subject is the instrument used to show a placeholder.
+
+    An operator who cannot see what the reader was given cannot tell a reader
+    that read the language from one that invented a reading of it, which is the
+    exact failure the step exists to catch.
+    """
+    m, client = machine(scripted, corpus, capability_answers())
+    while (p := m.plan()).kind != "qualification":
+        m.execute(p)
+
+    assert p.calls, "qualification must say what it will send"
+    assert all("Der Bus kam zu spät an." in c.user for c in p.calls), \
+        "the control text itself, not a description of it"
+
+    m.execute(p)
+    sent = [c["user"] for c in client.calls if c["user"].startswith("Translate")]
+    assert sent[0] == p.calls[0].user, "what was shown is what went out"
+
+
+def test_qualification_keeps_what_the_reader_answered(scripted, corpus):
+    m, _ = machine(scripted, corpus, capability_answers())
+    drain(m)
+    qual = next(e for e in m.history if e.kind == "qualification")
+    evidence = qual.result["evidence"]
+    assert len(evidence) == 2, "one row per control item put to the reader"
+    assert evidence[0]["control"] == "Der Bus kam zu spät an."
+    assert evidence[0]["got"] == BACK
+    assert evidence[0]["expected"] == BACK
+    assert evidence[0]["score"] > 90
+
+
+def test_a_rejected_reader_is_not_tried_again(scripted, corpus):
+    from polyglot.core.bt import RemoteBackTranslator
+
+    client = scripted(capability_answers())
+    m, _ = machine(scripted, corpus, capability_answers())
+    m.client = client
+    m.panel = [RemoteBackTranslator(client, "other-reader-b"),
+               RemoteBackTranslator(client, "other-reader-c")]
+
+    while (p := m.plan()).kind != "qualification":
+        m.execute(p)
+    m.execute(p)
+    assert m.state().bt.id == "remote:other-reader-b"
+
+    m.override_reader("reject", "it invented the reading")
+    again = m.plan()
+    assert again.kind == "qualification"
+    assert "remote:other-reader-b" not in again.context["panel"]
+    m.execute(again)
+    assert m.state().bt.id == "remote:other-reader-c"
+    assert m.outcome()["instrument_overridden"] is True
+
+
+def test_a_reader_kept_over_the_threshold_carries_the_run(scripted, corpus):
+    answers = {**capability_answers(), "backtranslation": "Ein ganz anderer Text."}
+    m, _ = machine(scripted, corpus, answers)
+    while (p := m.plan()).kind != "qualification":
+        m.execute(p)
+    m.execute(p)
+    assert not m.state().qual.trustworthy
+    assert m.plan().kind == "unverified", "the method stops here on its own"
+
+    m.override_reader("accept", "the reading is sound")
+    assert m.state().qual.trustworthy
+    assert m.plan().kind == "judge", "the run goes on to grading"
+
+
+def test_rejecting_every_reader_stops_the_run_rather_than_falling_back(scripted, corpus):
+    m, _ = machine(scripted, corpus, capability_answers())
+    while (p := m.plan()).kind != "qualification":
+        m.execute(p)
+    m.execute(p)
+    m.override_reader("reject")
+    m.execute(m.plan())
+    assert not m.state().qual.trustworthy
+    assert m.plan().kind == "unverified"
+
+
+# -- a broken endpoint is not a model that cannot write the language ----------
+
+def test_a_failing_call_is_void_rather_than_a_refusal(scripted, corpus):
+    """The one mistake this project refuses to make, in its smallest form.
+
+    gpt-5-nano rejects `max_tokens`; the 400 came back as empty text, the gate
+    read that as a refusal, and three of them would have published "Unusable"
+    for a language the model was never actually asked about.
+    """
+    from polyglot.core.client.openai_compat import Completion
+    from polyglot.core.probe.gate import GateVerdict
+
+    answers = {"generation": Completion(None, "HTTP 400: unsupported parameter")}
+    m, _ = machine(scripted, corpus, answers)
+    m.execute(m.plan())
+    item = m.history[0].obj
+    assert item.gate.verdict is GateVerdict.NO_ANSWER
+    assert not item.counts_against, "a failed call is not evidence about the model"
+
+
+def test_an_engine_that_never_answers_stops_the_run_without_a_verdict(scripted, corpus):
+    from polyglot.core.client.openai_compat import Completion
+
+    answers = {"generation": Completion(None, "HTTP 400: unsupported parameter")}
+    m, client = machine(scripted, corpus, answers)
+    out = drain(m)
+    assert [e.kind for e in m.history] == ["generate", "generate", "no-answer"], \
+        "two dead calls end it; it does not sweep four designators into silence"
+    assert out["incomplete"] is True
+    assert "returned nothing" in out["notes"][0]
+    assert not any(c["model"] == "other-reader-b" for c in client.calls), \
+        "nothing may be paid for an instrument when nothing was measured"

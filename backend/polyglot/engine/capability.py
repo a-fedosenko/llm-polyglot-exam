@@ -29,8 +29,10 @@ import copy
 from dataclasses import dataclass, field
 
 from polyglot.core.bt import RemoteBackTranslator, route
-from polyglot.core.bt.qualify import MIN_CHRF, MIN_RECALL, Qualification
+from polyglot.core.bt.qualify import (MIN_CHRF, MIN_RECALL, Qualification,
+                                      QualStatus, control_for)
 from polyglot.core.probe import designator as dsg
+from polyglot.core.probe.gate import GateVerdict
 from polyglot.core.probe import pivot as pivot_mod
 from polyglot.core.probe.corpus import Corpus
 from polyglot.core.probe.ladder_support import (DesignatorTrial, accepted_codes,
@@ -95,6 +97,25 @@ HELP: dict[str, tuple[str, str]] = {
         "refuse — it invents: one handed known Chuvash returned “A man is "
         "walking. He is wearing a white shirt.”",
     ),
+    "reader-override": (
+        "The operator ruled on the reader",
+        "Qualification is a measurement, and a measurement a person cannot "
+        "overrule is an authority. The transcript is on the page — control "
+        "text in, reading out, score against the reference — so a reader that "
+        "clearly read the language can be kept over a threshold that said "
+        "otherwise, and one that clearly invented can be thrown out. Any run "
+        "that took this route is kept in full and never becomes a stored "
+        "verdict: it measured an instrument the method did not certify.",
+    ),
+    "no-answer": (
+        "Stop: the engine never answered",
+        "Every call to the model under test came back without text — an HTTP "
+        "error, a timeout, or a reasoning model that spent its whole budget "
+        "before emitting a token. None of that is evidence about the language: "
+        "a failure of the instrument must never be published as a failure of "
+        "the thing being measured, so the run stops with no verdict rather "
+        "than recording a model that refused.",
+    ),
     "unverified": (
         "Stop: cannot be verified",
         "No back-translator could be qualified for this language, so quality is "
@@ -153,6 +174,18 @@ class State:
     #: candidate index -> the items generated under it, in spec order
     by_candidate: dict[int, list[ItemOutcome]] = field(default_factory=dict)
     trials: list[DesignatorTrial] = field(default_factory=list)
+    #: Readers the operator threw out after reading the transcript. They are
+    #: not tried again on this run, whatever the cache remembers about them.
+    rejected: set = field(default_factory=set)
+    #: Set when the operator asked for the check to be paid for again rather
+    #: than taken from the cache, which is the only way to get a transcript
+    #: for a reader qualified on an earlier run.
+    recheck: bool = False
+    #: Whether a person overruled the instrument's own verdict on itself.
+    overridden: bool = False
+    #: The engine never answered — nothing was measured, and the run says so
+    #: instead of scoring the silence.
+    unanswered: bool = False
     chosen: int | None = None
     deterministic: bool = False
     sweep_done: bool = False
@@ -273,6 +306,21 @@ class CapabilityMachine:
                 st.sweep_done = True
             elif ex.kind == "qualification":
                 st.bt, st.qual = ex.obj
+            elif ex.kind == "reader-override":
+                st.overridden = True
+                decision = ex.result.get("decision")
+                if decision == "accept":
+                    st.bt, st.qual = ex.obj
+                else:
+                    # Reject and recheck both put the run back before the
+                    # reader was chosen: there is no state to undo, only
+                    # history to add to, so the next `plan()` qualifies again
+                    # under the new constraint.
+                    if decision == "reject":
+                        st.rejected.add(ex.result.get("backtranslator"))
+                    else:
+                        st.recheck = True
+                    st.bt, st.qual = None, None
             elif ex.kind == "judge":
                 st.judged[str(ctx["spec_id"])] = ex.obj
             elif ex.kind == "extra-item":
@@ -280,7 +328,9 @@ class CapabilityMachine:
             elif ex.kind == "score":
                 st.scored_at_rung = int(ctx.get("rung") or 2)
                 st.borderline = bool(ex.result.get("borderline"))
-            if ex.kind in ("deterministic-negative", "unverified"):
+            elif ex.kind == "no-answer":
+                st.unanswered = True
+            if ex.kind in ("deterministic-negative", "unverified", "no-answer"):
                 st.finished = True
             for k, v in (ex.calls or {}).items():
                 st.calls[k] = st.calls.get(k, 0) + v
@@ -310,6 +360,19 @@ class CapabilityMachine:
         if st.finished:
             return None
 
+        # Before anything else: did the engine answer at all? Two calls that
+        # came back with nothing is a broken endpoint, not a model declining to
+        # write a language — and the difference is the whole difference between
+        # a verdict and a wasted afternoon. Two rather than one, so a single
+        # timeout does not end a run the retries would have carried.
+        attempted = [i for items in st.by_candidate.values() for i in items]
+        if len(attempted) >= 2 and all(
+                i.gate.verdict is GateVerdict.NO_ANSWER for i in attempted):
+            return self._free(
+                "no-answer", PHASE_VERDICT,
+                f"{len(attempted)} call(s) to {self.engine} came back with "
+                f"nothing: {attempted[-1].error or attempted[-1].gate.detail}")
+
         if not st.sweep_done:
             return self._plan_sweep(st)
 
@@ -318,20 +381,7 @@ class CapabilityMachine:
                               "Settle it locally: no reader is needed")
 
         if st.qual is None:
-            return Planned(
-                kind="qualification", phase=PHASE_READER,
-                title=HELP["qualification"][0], explains=HELP["qualification"][1],
-                summary=(f"Try {len(self.panel)} reader(s) against known "
-                         f"{self.tag} text, in measured order: "
-                         f"{', '.join(b.id for b in self.panel) or 'none available'}"),
-                # The prompts here are the back-translator's own and a chrF++
-                # comparison against reference text; there is nothing useful to
-                # rewrite, and rewriting it would uncertify the instrument.
-                editable=False,
-                calls=[Call(role="backtranslation", model=b.model,
-                            user="[control text for qualification]",
-                            label=f"qualify {b.id}") for b in self.panel],
-                context={"panel": [b.id for b in self.panel]})
+            return self._plan_qualification(st)
 
         if not st.qual.trustworthy:
             return self._free("unverified", PHASE_VERDICT,
@@ -374,6 +424,75 @@ class CapabilityMachine:
         return self._free("designator-chosen", PHASE_DESIGNATOR,
                           "Keep the best-performing designator and run everything "
                           "else under it")
+
+    def _plan_qualification(self, st: State) -> Planned:
+        """What qualifying the reader will actually send, in full.
+
+        The control text is on disk before the run starts, so there is no
+        reason to show a placeholder where it belongs — and every reason not
+        to. This is the one step whose subject is the instrument itself; an
+        operator who cannot see what the reader was given cannot tell a reader
+        that read the language from one that invented a reading of it, which
+        is the exact failure the step exists to catch.
+
+        What it still cannot promise is the *order*: the panel is tried in
+        measured order and stops at the first that qualifies, so everything
+        below the first reader is shown as what it would cost if the one above
+        it fails.
+        """
+        panel = self._panel(st)
+        entry = control_for(self.tag, self.controls, self.scheme)
+        items = list(entry.get("items") or []) if entry else []
+        source = (entry or {}).get("derived_from")
+
+        if not items:
+            return Planned(
+                kind="qualification", phase=PHASE_READER,
+                title=HELP["qualification"][0], explains=HELP["qualification"][1],
+                summary=(f"No control text exists for {self.tag}, so no reader "
+                         f"can be qualified for it — nothing will be sent and "
+                         f"the run stops as unverified"),
+                editable=False, calls=[],
+                context={"panel": [b.id for b in panel]})
+
+        calls: list[Call] = []
+        cached: list[str] = []
+        for b in panel:
+            was = None if st.recheck or self.cache is None else self.cache.get(b.id, self.tag)
+            if was is not None:
+                cached.append(f"{b.id}: {was.status.value} on an earlier run")
+                continue
+            for n, item in enumerate(items, 1):
+                calls.append(Call(
+                    role="backtranslation", model=b.model,
+                    user=b.build_prompt(item["text"]), max_tokens=500,
+                    label=f"{b.id} · control {n} of {len(items)}"
+                          + ("" if not calls else " — only if the reader above fails")))
+
+        kind = (entry or {}).get("kind")
+        how = (f"scored with chrF++ against the known reference, pass at {MIN_CHRF:g}"
+               if kind == "reference" else
+               f"graded on how many known facts come back, pass at {MIN_RECALL:.0%}")
+        where = f", borrowed from {source}" if source else ""
+        summary = (f"Read {len(items)} piece(s) of known {self.tag} text{where} "
+                   f"back into {self.pivot} and compare: {how}. Readers in "
+                   f"measured order: {', '.join(b.id for b in panel) or 'none left'}")
+        if cached:
+            summary += f" · already answered — {'; '.join(cached)}"
+        return Planned(
+            kind="qualification", phase=PHASE_READER,
+            title=HELP["qualification"][0], explains=HELP["qualification"][1],
+            summary=summary,
+            # The prompts here are the back-translator's own and a chrF++
+            # comparison against reference text; there is nothing useful to
+            # rewrite, and rewriting it would uncertify the instrument.
+            editable=False, calls=calls,
+            context={"panel": [b.id for b in panel]})
+
+    def _panel(self, st: State) -> list:
+        """The readers still in the running: the measured order, less anyone the
+        operator threw out after reading what they answered."""
+        return [b for b in self.panel if b.id not in st.rejected]
 
     def _plan_generate(self, ci: int, spec: Spec, *, kind: str = "generate") -> Planned:
         cand = self.candidates[ci]
@@ -519,6 +638,7 @@ class CapabilityMachine:
                     "verdicts": [i.gate.verdict.value for i in items]})
 
     def _do_qualification(self, planned: Planned, _sent) -> Executed:
+        st = self.state()
         tried: list[Qualification] = []
         # Counted rather than estimated. How many calls qualifying costs
         # depends on which kind of control exists for the language and how many
@@ -526,10 +646,33 @@ class CapabilityMachine:
         # a guess as its spend would be lying about the one number the operator
         # is actually watching.
         counter = _Counting(self.client)
+        members = self._panel(st)
+        if not members:
+            # Every reader on the panel was thrown out by the operator. That is
+            # a statement about the instrument, like any other no-control, and
+            # the run stops rather than falling back on one of them.
+            qual = Qualification(
+                QualStatus.NO_CONTROL, 0.0,
+                ", ".join(sorted(st.rejected)) or "none", self.tag, "operator",
+                "Every reader on the panel was rejected by the operator, so "
+                "nothing is left to read this language back.")
+            return self._make(
+                planned, summary="No reader left on the panel", tone="bad",
+                result={"backtranslator": qual.backtranslator,
+                        "status": qual.status.value, "score": 0.0,
+                        "kind": "operator", "detail": qual.detail,
+                        "pivot": self.pivot, "trustworthy": False,
+                        "panel": [], "rejected": sorted(st.rejected),
+                        "attempts": [], "evidence": [], "threshold": None},
+                obj=(RemoteBackTranslator(self.client, self.panel[0].model,
+                                          pivot=self.pivot), qual))
         panel = [RemoteBackTranslator(counter, b.model, pivot=b.pivot)
-                 for b in self.panel]
+                 for b in members]
         bt, qual = route(panel, counter, self.judge_model, self.tag,
-                         controls=self.controls, cache=self.cache,
+                         controls=self.controls,
+                         # A re-check the operator asked for is a re-check: the
+                         # cache is what it is being asked to go behind.
+                         cache=None if st.recheck else self.cache,
                          scheme=self.scheme, attempts=tried)
         # The reader that is kept must talk to the real client, not the probe's
         # counting wrapper, which exists only for the length of this step.
@@ -543,16 +686,41 @@ class CapabilityMachine:
                     "score": round(qual.score, 2), "kind": qual.kind,
                     "detail": qual.detail, "pivot": self.pivot,
                     "trustworthy": qual.trustworthy,
-                    "panel": [b.id for b in self.panel],
+                    "panel": [b.id for b in members],
+                    "rejected": sorted(st.rejected),
+                    "rechecked": st.recheck,
+                    # What the reader was given and what it answered, item by
+                    # item. Empty when the answer came from the cache rather
+                    # than from a call, and the page says so instead of showing
+                    # a score with nothing behind it.
+                    "evidence": [dict(e) for e in qual.evidence],
+                    "from_cache": not qual.evidence and qual.kind != "operator",
                     # Every attempt, so "why this reader" is answerable from the
                     # page rather than from the source.
                     "attempts": [{"backtranslator": q.backtranslator,
                                   "status": q.status.value, "score": round(q.score, 2),
-                                  "kind": q.kind, "detail": q.detail} for q in tried],
+                                  "kind": q.kind, "detail": q.detail,
+                                  "evidence": [dict(e) for e in q.evidence]}
+                                 for q in tried],
                     "threshold": (MIN_CHRF if qual.kind == "reference"
                                   else MIN_RECALL if qual.kind == "facts" else None)},
             calls={"backtranslation": counter.n},
             obj=(bt, qual))
+
+    def _do_no_answer(self, planned: Planned, _sent) -> Executed:
+        st = self.state()
+        attempted = [i for items in st.by_candidate.values() for i in items]
+        errors: list[str] = []
+        for i in attempted:
+            e = i.error or i.gate.detail
+            if e and e not in errors:
+                errors.append(e)
+        return self._make(
+            planned,
+            summary=f"{self.engine} returned nothing on every attempt",
+            tone="bad",
+            result={"engine": self.engine, "attempts": len(attempted),
+                    "errors": errors})
 
     def _do_unverified(self, planned: Planned, _sent) -> Executed:
         st = self.state()
@@ -621,11 +789,90 @@ class CapabilityMachine:
         assert st.qual is not None
         return score_run(self.best_items(st), qualification=st.qual, tag=self.tag)
 
+    # -- the operator's ruling on the instrument -------------------------------
+
+    DECISIONS = ("accept", "reject", "recheck")
+
+    def override_reader(self, decision: str, why: str = "") -> Executed:
+        """Overrule the qualification step, having read what it did.
+
+        Three rulings, and all three are history rather than state: the step is
+        appended like any other, the fold reads it, and `plan()` works out what
+        follows. Nothing is mutated, so a ruling can itself be re-run away.
+
+          accept    keep this reader even though the threshold said no. The
+                    thresholds are calibrated on two real cases (a fabricating
+                    reader at 10.5, a faithful one at 81.9) and are simply
+                    wrong in the middle — protocol 016 found 90% of one
+                    metric's disagreements with fact recall were adequate
+                    translations. A person reading the transcript can see
+                    which they are looking at; the number cannot.
+          reject    throw this reader out and try the next on the panel. For
+                    the opposite case: a score above the line that the
+                    transcript shows was earned by inventing plausible text.
+          recheck   pay for the check again instead of taking it from the
+                    cache, which is the only way to get a transcript for a
+                    reader qualified on an earlier run.
+
+        A run that was ruled on is kept in full and never promoted to a stored
+        verdict — it measured an instrument the method did not certify.
+        """
+        if decision not in self.DECISIONS:
+            raise ValueError(f"Not a ruling this step takes: {decision!r}. "
+                             f"One of {', '.join(self.DECISIONS)}.")
+        st = self.state()
+        if st.qual is None or st.bt is None:
+            raise ValueError("There is no reader to rule on yet — the "
+                             "qualification step has not run.")
+
+        reader, prior = st.bt, st.qual
+        note = (why or "").strip()
+        if decision == "accept":
+            qual = Qualification(
+                QualStatus.QUALIFIED, prior.score, prior.backtranslator,
+                self.tag, "operator",
+                (f"Accepted by the operator over a {prior.kind or 'threshold'} "
+                 f"result of {prior.score:.2f}"
+                 + (f": {note}" if note else ".")),
+                prior.evidence)
+            summary = f"{reader.id} kept by the operator, against the threshold"
+            tone, obj = "warn", (reader, qual)
+        elif decision == "reject":
+            summary = f"{reader.id} thrown out by the operator"
+            tone, obj = "warn", None
+        else:
+            summary = f"{reader.id} to be checked again, ignoring the cache"
+            tone, obj = "warn", None
+
+        ex = Executed(
+            ordinal=len(self.history), kind="reader-override", phase=PHASE_READER,
+            title=HELP["reader-override"][0], explains=HELP["reader-override"][1],
+            summary=summary, tone=tone,
+            request={"context": {"decision": decision}, "calls": []},
+            result={"decision": decision, "backtranslator": prior.backtranslator,
+                    "why": note, "corpus": [],
+                    "was": {"status": prior.status.value,
+                            "score": round(prior.score, 2),
+                            "kind": prior.kind, "detail": prior.detail}},
+            obj=obj)
+        self.history.append(ex)
+        return ex
+
     # -- the verdict ----------------------------------------------------------
 
     def outcome(self) -> dict:
         """What the run concluded, in the shape the page and the store want."""
         st = self.state()
+        if st.unanswered:
+            attempted = [i for items in st.by_candidate.values() for i in items]
+            return {
+                "test_type": self.test_type, "tag": self.tag,
+                "engine": self.engine, "incomplete": True,
+                "error": next((i.error for i in attempted if i.error), None),
+                "notes": [f"{self.engine} returned nothing on every attempt, so "
+                          f"nothing about {self.tag} was measured. This is a "
+                          f"statement about the endpoint, not about the model."],
+            }
         if st.chosen is None:
             return {"test_type": self.test_type, "tag": self.tag,
                     "engine": self.engine, "incomplete": True}
@@ -649,7 +896,12 @@ class CapabilityMachine:
                               {"backtranslator": st.qual.backtranslator,
                                "status": st.qual.status.value,
                                "score": round(st.qual.score, 2),
+                               "kind": st.qual.kind,
                                "detail": st.qual.detail}),
+            #: A person overruled the qualification of the instrument. Kept in
+            #: full, readable, and never promoted: results are only comparable
+            #: within one instrument, and this one was not the method's.
+            "instrument_overridden": st.overridden,
         }
 
     # -- adjudication ---------------------------------------------------------

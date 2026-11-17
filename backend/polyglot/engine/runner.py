@@ -81,6 +81,13 @@ class Session:
     #: payload sends exactly what the page was shown.
     pending: Planned | None = None
     auto: bool = False
+    #: Every correction the operator has made to a judge or attestor verdict on
+    #: this run, newest winning, keyed by what it corrects. Kept because
+    #: adjudication re-scores the *whole* run from the measurement each time:
+    #: a second correction that arrived carrying only itself would quietly
+    #: undo the first, which is how a page comes to disagree with itself.
+    overrides: list = field(default_factory=list)
+    adjudication: dict | None = None
     #: Set by the page to stop an auto run between steps. Never mid-call: every
     #: call is paid for by the time it could be checked, so stopping sooner
     #: would only mean losing the answer that was already bought.
@@ -400,6 +407,33 @@ def rerun(sess: Session, ordinal: int) -> dict:
         return {"dropped": dropped, "from": ordinal}
 
 
+def rule_on_reader(sess: Session, decision: str, why: str = "") -> dict:
+    """Record the operator's ruling on the qualification step.
+
+    A step like any other: appended to the history, persisted, and read by the
+    next `plan()`. The run stays open and continues from wherever the ruling
+    leaves it — a kept reader goes on to judging, a thrown-out one sends the
+    panel back round, a re-check pays for the transcript the cache could not
+    produce.
+    """
+    with sess.lock:
+        if sess.status != "running":
+            raise RunError("This run is closed. Its steps stay readable, but "
+                           "nothing further can be ruled on.")
+        if sess.auto:
+            raise RunError("Pause the run first — a ruling on the reader "
+                           "changes what the next step is.")
+        machine = sess.machine
+        if not hasattr(machine, "override_reader"):
+            raise RunError("Only a capability test qualifies a reader.")
+        ex = machine.override_reader(decision, why)  # type: ignore[attr-defined]
+        sess.pending = None
+        sess.touched_at = time.time()
+        with session() as s:
+            repo.add_step(s, sess.id, ex.row())
+        return ex.as_dict()
+
+
 def set_panel(sess: Session, attestors: list[str]) -> dict:
     machine = sess.machine
     if not hasattr(machine, "set_panel"):
@@ -468,7 +502,8 @@ def _finish(sess: Session) -> None:
         # instrument, and results are only comparable within one. It is kept in
         # full — the corpus has every text — and it is never promoted to a
         # standing verdict.
-        if not sess.prompt_edited and not outcome.get("incomplete"):
+        if (not sess.prompt_edited and not outcome.get("incomplete")
+                and not outcome.get("instrument_overridden")):
             repo.put_verdict(s, _verdict_row(sess, outcome), promote=None)
 
 
@@ -500,8 +535,29 @@ def _verdict_row(sess: Session, outcome: dict) -> dict:
     }
 
 
+def _override_key(o: dict) -> tuple:
+    """What two corrections have to share to be the same correction."""
+    if "spec_id" in o:
+        return ("fact", str(o.get("spec_id")), int(o.get("index", -1)))
+    return ("attestor", str(o.get("probe")), str(o.get("attestor")))
+
+
 def adjudicate(sess: Session, overrides: list[dict]) -> dict:
-    result = sess.machine.adjudicate(overrides)  # type: ignore[attr-defined]
+    """Apply the operator's corrections, every one of them, to a fresh re-score.
+
+    The machine re-scores from the measurement on each call, so it has to be
+    handed the whole set rather than the latest arrival. The session keeps
+    them: correcting one fact and then another used to leave only the second
+    applied, and the page showed a number for a correction the reader had not
+    made.
+    """
+    merged = {_override_key(o): o for o in sess.overrides}
+    for o in overrides:
+        merged[_override_key(o)] = o
+    sess.overrides = list(merged.values())
+    result = sess.machine.adjudicate(sess.overrides)  # type: ignore[attr-defined]
+    result = {**result, "overrides": sess.overrides}
+    sess.adjudication = result
     with session() as s:
         repo.finish_run(s, sess.id, adjudication=result)
     return result
@@ -546,6 +602,7 @@ def snapshot(sess: Session) -> dict:
         "spent": _spent(sess),
         "next": (p.as_dict() if (p := machine.plan()) else None),  # type: ignore[attr-defined]
         "outcome": outcome,
+        "adjudication": sess.adjudication,
         "corpus": str(sess.corpus.path),
     }
 

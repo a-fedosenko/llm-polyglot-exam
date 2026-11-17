@@ -55,8 +55,15 @@ class Qualification:
     score: float
     backtranslator: str
     tag: str
-    kind: str = ""          # "reference" | "facts" | ""
+    kind: str = ""          # "reference" | "facts" | "operator" | ""
     detail: str = ""
+    #: One entry per control item actually put to the reader: the text it was
+    #: given, the answer it gave, what that answer was measured against, and
+    #: the number that came out of the comparison. Empty when the verdict did
+    #: not come from a live check — a cache hit, or an operator's decision —
+    #: and the page says which, because "qualified at 73.1" with nothing behind
+    #: it asks the operator to take the instrument's word for the instrument.
+    evidence: tuple[dict, ...] = ()
 
     @property
     def trustworthy(self) -> bool:
@@ -66,7 +73,8 @@ class Qualification:
     def as_dict(self) -> dict:
         return {"status": self.status.value, "score": round(self.score, 2),
                 "kind": self.kind, "backtranslator": self.backtranslator,
-                "detail": self.detail}
+                "detail": self.detail,
+                "evidence": [dict(e) for e in self.evidence]}
 
 
 def load_controls(pivot: str = "en") -> dict[str, dict]:
@@ -152,40 +160,65 @@ class QualificationCache:
 
 
 def _qualify_reference(bt: RemoteBackTranslator, tag: str, items: list[dict]) -> Qualification:
-    scores = []
+    scores: list[float] = []
+    seen: list[dict] = []
     for item in items:
-        translated = bt.translate(item["text"])
+        prompt = bt.build_prompt(item["text"])
+        translated = bt.translate(item["text"], prompt=prompt)
+        row = {"control": item["text"], "prompt": prompt,
+               "expected": item["reference"], "got": translated.text,
+               "error": translated.error, "metric": "chrF++"}
         if not translated.ok:
+            seen.append(row)
             return Qualification(QualStatus.FAILED, 0.0, bt.id, tag, "reference",
-                                 f"back-translation failed: {translated.error}")
-        scores.append(chrf(translated.text or "", item["reference"]))
+                                 f"back-translation failed: {translated.error}",
+                                 tuple(seen))
+        s = chrf(translated.text or "", item["reference"])
+        scores.append(s)
+        seen.append({**row, "score": round(s, 2), "threshold": MIN_CHRF})
     mean = sum(scores) / len(scores)
     if mean >= MIN_CHRF:
-        return Qualification(QualStatus.QUALIFIED, mean, bt.id, tag, "reference")
+        return Qualification(QualStatus.QUALIFIED, mean, bt.id, tag, "reference",
+                             "", tuple(seen))
     return Qualification(QualStatus.FAILED, mean, bt.id, tag, "reference",
                          f"chrF++ {mean:.1f} against known reference text "
-                         "— this back-translator cannot read the language")
+                         "— this back-translator cannot read the language",
+                         tuple(seen))
 
 
 def _qualify_facts(bt: RemoteBackTranslator, client: OpenAICompatClient, judge_model: str,
                    tag: str, items: list[dict]) -> Qualification:
     recalls = []
+    seen: list[dict] = []
     for item in items:
-        translated = bt.translate(item["text"])
+        prompt = bt.build_prompt(item["text"])
+        translated = bt.translate(item["text"], prompt=prompt)
+        row = {"control": item["text"], "prompt": prompt,
+               "facts": list(item["facts"]), "got": translated.text,
+               "error": translated.error, "metric": "fact recall"}
         if not translated.ok:
+            seen.append(row)
             return Qualification(QualStatus.FAILED, 0.0, bt.id, tag, "facts",
-                                 f"back-translation failed: {translated.error}")
+                                 f"back-translation failed: {translated.error}",
+                                 tuple(seen))
         judgement = run_judge(client, judge_model, translated.text or "", item["facts"])
         if not judgement.ok:
+            seen.append({**row, "error": f"judge: {judgement.error}"})
             return Qualification(QualStatus.FAILED, 0.0, bt.id, tag, "facts",
-                                 f"judge failed during qualification: {judgement.error}")
+                                 f"judge failed during qualification: {judgement.error}",
+                                 tuple(seen))
+        seen.append({**row, "score": round(judgement.recall, 2),
+                     "threshold": MIN_RECALL,
+                     "verdicts": [v.value for v in judgement.verdicts]})
         recalls.append(judgement.recall)
     mean = sum(recalls) / len(recalls)
     if mean >= MIN_RECALL:
-        return Qualification(QualStatus.QUALIFIED, mean, bt.id, tag, "facts")
+        return Qualification(QualStatus.QUALIFIED, mean, bt.id, tag, "facts",
+                             "", tuple(seen))
     return Qualification(QualStatus.FAILED, mean, bt.id, tag, "facts",
                          f"recovered only {mean:.0%} of known facts from text of known "
-                         "meaning — this back-translator cannot read the language")
+                         "meaning — this back-translator cannot read the language",
+                         tuple(seen))
 
 
 def _script_sibling(controls: dict[str, dict], tag: str, scheme=None) -> dict | None:
@@ -246,6 +279,21 @@ def _script_sibling(controls: dict[str, dict], tag: str, scheme=None) -> dict | 
                 and compatible(want.script, cand.script)):
             return {**entry, "derived_from": other}
     return None
+
+
+def control_for(tag: str, controls: dict[str, dict] | None = None,
+                scheme=None) -> dict | None:
+    """The control this tag will be checked against, or None if it has none.
+
+    Public because the pre-flight needs it. A page that promises "what is shown
+    is what goes out" and then shows a placeholder where the control text
+    belongs is making the claim the rest of this module exists to avoid: the
+    operator cannot check an instrument whose input they are not allowed to
+    see.
+    """
+    controls = controls if controls is not None else load_controls()
+    entry = controls.get(tag) or _script_sibling(controls, tag, scheme)
+    return entry if entry and entry.get("items") else None
 
 
 def qualify(bt: RemoteBackTranslator, client: OpenAICompatClient, judge_model: str,

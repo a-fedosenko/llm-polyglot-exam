@@ -37,7 +37,8 @@ RUNG3_ITEMS = 6
 #: Gate verdicts that neither pass nor count against the model: the item is void,
 #: not evidence. Memorised boilerplate, text too short to judge, and LID calls too
 #: weak to convict on.
-VOID = {GateVerdict.MEMORISED, GateVerdict.TOO_SHORT, GateVerdict.LOW_CONFIDENCE}
+VOID = {GateVerdict.MEMORISED, GateVerdict.TOO_SHORT, GateVerdict.LOW_CONFIDENCE,
+        GateVerdict.NO_ANSWER}
 
 
 def gate_tone(verdict: GateVerdict) -> str:
@@ -115,6 +116,7 @@ def item_detail(item: ItemOutcome) -> dict:
         "recall": (round(item.judgement.recall, 3)
                    if item.judgement and item.judgement.ok else None),
         "error": item.error,
+        "adjusted": list(item.adjusted),
     }
 
 

@@ -28,7 +28,7 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
   const [busy, setBusy] = useState(false);
 
   const load = () => {
-    if (promptEdited) return;
+    if (promptEdited || (outcome as any).instrument_overridden) return;
     api.verdictHistory(outcome.engine, outcome.tag, outcome.test_type)
       .then((r) => {
         setHistory(r.verdicts);
@@ -45,6 +45,8 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
     try { await api.approve(verdict.id, yes); load(); } finally { setBusy(false); }
   };
 
+  const overruled = !!(outcome as any).instrument_overridden;
+  const unstored = promptEdited || overruled;
   const tone = TIER_TONE[outcome.level] ?? "";
   const spent = Object.values(outcome.calls ?? {}).reduce((a, b) => a + b, 0);
 
@@ -92,18 +94,20 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
         </p>
       )}
 
-      {promptEdited && (
+      {unstored && (
         <p className="rounded-md border border-warn/30 bg-warn-soft p-3 text-[12.5px]
                       leading-relaxed text-warn">
-          <b>Not stored as a verdict.</b> A prompt or scenario was rewritten during
-          this run, so it measured a different instrument from everything else in
-          the table. Every call it made is still on disk — the corpus keeps the
-          text — and the run is readable in full. It simply cannot be compared
-          with anything, and a number you cannot compare is not a result.
+          <b>Not stored as a verdict.</b>{" "}
+          {promptEdited
+            ? "A prompt or scenario was rewritten during this run, so it measured a different instrument from everything else in the table."
+            : "You overruled the qualification of the reader, so this run measured an instrument the method did not certify — which is a different instrument from the one behind every other row in the table."}
+          {" "}Every call it made is still on disk — the corpus keeps the text —
+          and the run is readable in full. It simply cannot be compared with
+          anything, and a number you cannot compare is not a result.
         </p>
       )}
 
-      {!promptEdited && verdict && (
+      {!unstored && verdict && (
         <Section title="Standing answer"
                  info="Approving is what makes a batch scan skip this language. Nothing is ever overwritten: a re-run adds a row, and promoting one is a reversible pointer move.">
           <div className="card p-3">

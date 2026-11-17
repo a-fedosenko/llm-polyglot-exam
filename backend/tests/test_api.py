@@ -247,3 +247,65 @@ def test_a_dialect_run_refuses_a_pair_that_excludes_its_own_subject(client):
         "varieties": ["pt-pt", "pt-cv"], "attestors": ["other-b"]})
     assert r.status_code == 400
     assert "has to be one of the two arms" in r.json()["detail"]
+
+
+def _run_until(client, run_id, kind, limit=60):
+    """Step until the named kind is the step that just happened."""
+    for _ in range(limit):
+        step = client.post(f"/api/runs/{run_id}/step").json()
+        if step["step"] and step["step"]["kind"] == kind:
+            return step
+        if step["status"] != "running":
+            break
+    raise AssertionError(f"the run never reached a {kind!r} step")
+
+
+def test_a_ruling_on_the_reader_keeps_the_run_out_of_the_verdicts(client):
+    r = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
+                                       "engine": "acme-a", "mode": "manual",
+                                       "backtranslator_panel": ["other-b"],
+                                       "judge_model": "other-c"})
+    run = r.json()
+    qual = _run_until(client, run["id"], "qualification")
+    assert qual["step"]["result"]["evidence"], \
+        "the page must be able to show what the reader was given and gave back"
+
+    ruled = client.post(f"/api/runs/{run['id']}/reader",
+                        json={"decision": "accept", "why": "it reads fine"})
+    assert ruled.status_code == 200, ruled.text
+    assert ruled.json()["step"]["kind"] == "reader-override"
+
+    for _ in range(60):
+        step = client.post(f"/api/runs/{run['id']}/step").json()
+        if step["status"] != "running":
+            break
+    assert step["status"] == "done", step
+    assert step["outcome"]["instrument_overridden"] is True
+    assert client.get("/api/verdicts").json()["verdicts"] == [], \
+        "a run whose instrument the operator overruled is never stored"
+
+
+def test_a_second_correction_does_not_undo_the_first(client):
+    """Adjudication re-scores from the measurement, so it needs every override.
+
+    Correcting one fact and then another used to leave only the second applied,
+    and the page showed a number for a correction the reader had not made.
+    """
+    r = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
+                                       "engine": "acme-a", "mode": "manual",
+                                       "backtranslator_panel": ["other-b"],
+                                       "judge_model": "other-c"})
+    run = r.json()
+    for _ in range(60):
+        step = client.post(f"/api/runs/{run['id']}/step").json()
+        if step["status"] != "running":
+            break
+    spec = step["outcome"]["items"][0]["spec_id"]
+
+    one = client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+        {"spec_id": spec, "index": 0, "verdict": "missing"}]}).json()
+    assert one["changed"] == 1
+    two = client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+        {"spec_id": spec, "index": 1, "verdict": "missing"}]}).json()
+    assert two["changed"] == 2, "the first correction has to still be applied"
+    assert {(a["index"]) for a in two["applied"]} == {0, 1}

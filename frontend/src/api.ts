@@ -92,6 +92,12 @@ export const api = {
   pause: (id: string) => post<{ ok: boolean }>(`/runs/${id}/pause`),
   rerun: (id: string, ordinal: number) =>
     post<{ dropped: number; next: Planned | null }>(`/runs/${id}/rerun/${ordinal}`),
+  /** The operator's ruling on the back-translator: keep it over the
+   *  threshold, throw it out, or pay for the check again rather than take it
+   *  from the cache. */
+  ruleOnReader: (id: string, decision: string, why = "") =>
+    post<{ step: Step; next: Planned | null }>(
+      `/runs/${id}/reader`, { decision, why }),
   setPanel: (id: string, attestors: string[]) =>
     post<{ plan: any; next: Planned | null }>(`/runs/${id}/panel`, { attestors }),
   adjudicate: (id: string, overrides: unknown[]) =>

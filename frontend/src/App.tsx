@@ -23,6 +23,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adjudication, setAdjudication] = useState<any>(null);
+  //: What the next step will send: the plan as it came, or the operator's
+  //: rewrite of it. Held here rather than inside the pre-flight panel because
+  //: the one button that sends it is in the run panel, and a draft the button
+  //: cannot see is a draft the button cannot honour.
+  const [draft, setDraft] = useState<Call[] | null>(null);
   const es = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -39,6 +44,7 @@ export default function App() {
     api.run(id)
       .then((snap) => {
         setRun(snap);
+        setAdjudication(snap.adjudication ?? null);
         if (snap.status === "running" && snap.auto) watch(id);
       })
       .catch(() => sessionStorage.removeItem(OPEN_RUN));
@@ -58,6 +64,8 @@ export default function App() {
     if (run && following.current && run.steps.length)
       setSelected(run.steps[run.steps.length - 1].ordinal);
   }, [run?.steps.length]);
+
+  useEffect(() => { setDraft(null); }, [run?.steps.length, run?.next?.kind]);
 
   const closeStream = () => { es.current?.close(); es.current = null; };
 
@@ -112,6 +120,16 @@ export default function App() {
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
 
+  //: The single run gesture. It sends the draft when there is one, so the
+  //: button in the run panel and the prompt on the stage can never disagree
+  //: about what goes out.
+  const runStep = () => {
+    if (!run?.next || busy || run.auto) return;
+    const dirty = draft && JSON.stringify(draft)
+                           !== JSON.stringify(run.next.calls);
+    step(dirty ? draft! : undefined);
+  };
+
   const goAuto = async () => {
     if (!run) return;
     setError(null);
@@ -143,6 +161,20 @@ export default function App() {
     } catch (e: any) { setError(e.message); }
   };
 
+  // The operator's ruling on the back-translator. It changes what happens
+  // next — a thrown-out reader sends the panel round again — so the run is
+  // reloaded whole rather than patched.
+  const ruleOnReader = async (decision: string, why = "") => {
+    if (!run) return;
+    setBusy(true); setError(null);
+    try {
+      await api.ruleOnReader(run.id, decision, why);
+      const snap = await api.run(run.id);
+      setRun(snap);
+      setSelected(null); following.current = true;
+    } catch (e: any) { setError(e.message); } finally { setBusy(false); }
+  };
+
   const overrideAttestor = async (probe: string, attestor: string, correct: boolean) => {
     if (!run) return;
     try {
@@ -157,7 +189,10 @@ export default function App() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (!run) return;
-      if (e.key === "Enter" && run.next && !busy) { e.preventDefault(); step(); }
+      if (e.key === "Enter" && run.next && !busy && !run.auto) {
+        e.preventDefault();
+        runStep();
+      }
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         e.preventDefault();
         following.current = false;
@@ -174,12 +209,14 @@ export default function App() {
 
   const current = run?.steps.find((s) => s.ordinal === selected) ?? null;
   const live = run?.status === "running";
-  // Every control in the setup bar describes the run already in flight, so
-  // changing one would make the bar disagree with the steps on screen.
-  const locked = run
-    ? (live
-        ? `A ${run.test_type} run on ${run.tag} is open — abort it to change this.`
-        : `Showing a finished ${run.test_type} run on ${run.tag}. Start a new test to change this.`)
+  // Locked only while a run is actually in flight: changing a control then
+  // would make the bar disagree with the steps on screen. A run that has
+  // stopped — finished, aborted, failed, or interrupted by a restart — is
+  // something you are *reading*, and locking the bar against it left the page
+  // with no way out at all: the abort button is for live runs and the "new
+  // test" button lives on a verdict panel an interrupted run never reaches.
+  const locked = live
+    ? `A ${run!.test_type} run on ${run!.tag} is open — abort it to change this.`
     : null;
   const blocked = config && !config.models_configured
     ? "No model endpoint is configured — see the banner below."
@@ -216,17 +253,25 @@ export default function App() {
           <aside className="min-h-0 border-r border-line bg-panel">
             <StepRail steps={run.steps} next={run.next} selected={selected}
                       onSelect={(o) => { following.current = false; setSelected(o); }}
+                      onSelectNext={() => { following.current = true; setSelected(null); }}
                       running={live} onRerun={rerun} />
           </aside>
 
-          <section className="min-h-0 border-r border-line">
-            {current
-              ? <Stage step={current}
-                       onOverrideFact={run.status === "done" ? overrideFact : undefined}
-                       onOverrideAttestor={run.status === "done" ? overrideAttestor : undefined} />
-              : run.next
-                ? <PromptEditor planned={run.next} busy={busy || !!run.auto}
-                                onRun={() => step()} onRunEdited={(c) => step(c)} />
+          <section className="flex min-h-0 flex-col border-r border-line">
+            {current ? (
+              <>
+                <Stage step={current}
+                       adjudication={adjudication}
+                       onOverrideFact={overrideFact}
+                       onOverrideAttestor={run.status === "done" ? overrideAttestor : undefined}
+                       onRuleOnReader={live && !run.auto && !busy
+                                       && current.ordinal === run.steps.length - 1
+                                         ? ruleOnReader : undefined} />
+              </>
+            ) : run.next
+                ? <PromptEditor planned={run.next}
+                                calls={draft ?? run.next.calls}
+                                onCalls={setDraft} />
                 : <Empty>This run is finished. Pick a step on the left to read it.</Empty>}
           </section>
 
@@ -237,7 +282,11 @@ export default function App() {
                             adjudication={adjudication}
                             onClear={abort} />
             ) : (
-              <Progress run={run} busy={busy} onStep={() => step()}
+              <Progress run={run} busy={busy} edited={!!draft
+                          && JSON.stringify(draft) !== JSON.stringify(run.next?.calls)}
+                        onStep={runStep} onReadNext={() => {
+                          following.current = true; setSelected(null);
+                        }}
                         onAuto={goAuto} onPause={pause} onAbort={abort} />
             )}
           </aside>
@@ -270,9 +319,21 @@ function TopBar({ config, run }: { config: Config | null; run: RunSnapshot | nul
   );
 }
 
-function Progress({ run, busy, onStep, onAuto, onPause, onAbort }: {
+/** What the run has spent, and every decision about where it goes next.
+ *
+ * **One run button, and this is it.** There used to be a second at the foot of
+ * the pre-flight — "Run this step" beside "Run next step", a hand's width
+ * apart, doing the same thing. Two primary buttons read as a choice, and the
+ * operator spends their first minute looking for a difference that is not
+ * there. What the step will send still lives on the stage, where it can be
+ * read and rewritten; what it costs and when it goes lives here. */
+function Progress({ run, busy, edited, onStep, onReadNext, onAuto, onPause, onAbort }: {
   run: RunSnapshot; busy: boolean;
-  onStep: () => void; onAuto: () => void; onPause: () => void; onAbort: () => void;
+  /** The prompt on the stage has been rewritten, so the button is about to
+   *  send something other than the method's own words. It says so. */
+  edited: boolean;
+  onStep: () => void; onReadNext: () => void;
+  onAuto: () => void; onPause: () => void; onAbort: () => void;
 }) {
   const spent = Object.entries(run.spent ?? {}).filter(([, v]) => v > 0);
   const total = spent.reduce((a, [, v]) => a + v, 0);
@@ -303,12 +364,35 @@ function Progress({ run, busy, onStep, onAuto, onPause, onAbort }: {
         )}
       </div>
 
+      {run.status === "running" && run.next && (
+        <div className="rounded-md border border-line bg-surface p-3">
+          <div className="label">next step</div>
+          <button onClick={onReadNext}
+                  className="mt-0.5 block w-full text-left text-[13px] font-medium
+                             text-ink hover:text-accent"
+                  title="Read what this step will send before you pay for it.">
+            {run.next.title}
+          </button>
+          <div className="mt-0.5 text-[11.5px] text-ink-faint">
+            {run.next.cost === 0
+              ? "free — nothing is sent"
+              : `${run.next.cost} model call${run.next.cost > 1 ? "s" : ""}`}
+            {edited && <span className="text-warn"> · your rewritten prompt</span>}
+          </div>
+          <button className="btn btn-primary relative mt-2.5 w-full justify-center
+                             py-2 text-[13.5px]"
+                  disabled={busy || !!run.auto} onClick={onStep}
+                  title="Send this step. Enter does the same.">
+            {busy ? "Running…" : "Run step"}
+            <span aria-hidden className="absolute right-2.5 text-[12px] opacity-60">
+              ↵
+            </span>
+          </button>
+        </div>
+      )}
+
       {run.status === "running" && (
         <div className="flex flex-wrap gap-2">
-          <button className="btn btn-primary" disabled={busy || !!run.auto || !run.next}
-                  onClick={onStep}>
-            Run next step
-          </button>
           {run.auto ? (
             <button className="btn" onClick={onPause}>Pause after this step</button>
           ) : (
@@ -325,12 +409,19 @@ function Progress({ run, busy, onStep, onAuto, onPause, onAbort }: {
         </div>
       )}
 
+      {run.status !== "running" && (
+        <button className="btn btn-primary w-full" onClick={onAbort}>
+          Close this run and set up another
+        </button>
+      )}
+
       {run.status === "interrupted" && (
         <p className="rounded-md border border-warn/30 bg-warn-soft p-3 text-[12.5px]
                       leading-relaxed text-warn">
           <b>This run outlived the process that was driving it.</b> Every step it
           finished is on record and readable, and the corpus kept every text — but
-          a half-finished measurement cannot be picked up again, so it stops here.
+          a half-finished measurement cannot be picked up again, so it stops
+          here. Close it above, or read its steps on the left first.
         </p>
       )}
 
