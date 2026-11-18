@@ -14,7 +14,12 @@ from polyglot.paths import ROOT
 #: one -- a changed prompt, a moved threshold, a different gate rule. It is part
 #: of a verdict's identity, so a bump does not destroy anything: it makes every
 #: stored verdict *stale* rather than wrong, and the UI says so.
-METHOD_VERSION = "4.0.0"
+#: 5.0.0 — P3 became a 2×2 between the two arms, replacing conversion from the
+#: umbrella (which was the model's own default variety, not a neutral source)
+#: and absorbing P4; a battery whose two arms come back identical stops free;
+#: a silent panel reports `indeterminate` rather than `no-evidence`; and
+#: confidence counts votes rather than panel members.
+METHOD_VERSION = "5.0.0"
 
 
 class Settings(BaseSettings):

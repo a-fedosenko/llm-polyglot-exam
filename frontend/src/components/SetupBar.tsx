@@ -172,7 +172,13 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       const script = d.language?.script ?? null;
       const named = (d.family ?? []).filter(
         (f: any) => !f.inclusive && (!script || !f.script || f.script === script));
+      // What to contrast against, in order: what you last chose for this
+      // language, then the family's *reference variety* — the baseline every
+      // other variety in the class is measured against, which is what makes
+      // two results in one family comparable — then whatever is first.
+      const refTag = d.reference?.tag ?? null;
       const other = named.find((f: any) => f.tag === contrastTag && f.tag !== tag)
+        ?? named.find((f: any) => f.tag === refTag && f.tag !== tag)
         ?? named.find((f: any) => f.tag !== tag);
       setVarieties(other ? [tag, other.tag] : [tag]);
     }).catch(() => setDetail(null));
@@ -338,6 +344,15 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                    source, and pairing it against a variety leaves one
                    answerable option, which is not a question.
                    <br /><br />
+                   It is seeded with the family's <b>reference variety</b>:
+                   the baseline every other variety in the class is measured
+                   against, which is what makes two results in one family
+                   comparable at all. A reference marked <i>provisional</i> is
+                   a placeholder — nobody has decided that family's yet and the
+                   first member is standing in, so a result taken against it is
+                   comparable to other results against the same placeholder and
+                   to nothing else.
+                   <br /><br />
                    Neither is a sibling in a <i>different alphabet</i>. A
                    digraphic family spans scripts — <span className="font-mono">
                    sr-ME-Cyrl</span> and <span className="font-mono">sr-ME-Latn
@@ -371,6 +386,13 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                   <span className="flex items-baseline gap-2">
                     <span className="w-24 shrink-0 font-mono text-[12px] text-ink-soft">{f.tag}</span>
                     <span className="text-[13px] text-ink">{f.region ?? ""}</span>
+                    {f.tag === detail?.reference?.tag && (
+                      <span className={`ml-auto text-[10.5px] ${
+                        detail.reference.decided ? "text-accent" : "text-warn"}`}>
+                        {detail.reference.decided
+                          ? "reference" : "reference (provisional)"}
+                      </span>
+                    )}
                   </span>
                 )}
               />

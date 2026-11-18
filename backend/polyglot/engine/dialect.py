@@ -10,13 +10,18 @@ yes/no" is what makes a dialect claim unconvincing.
 
     P1  blind identification   does an attestor name the variety, unlabelled?
     P2  contrast pair          can an attestor tell two varieties apart?
-    P3  conversion             does the model change anything when told to?
-    P4  self-consistency       does it change the *same* things every time?
+    P3  the square             each arm's text rewritten into *both* varieties
     P5  marker grounding       were the cited markers real?
 
-**P3 and P4 need no attestor at all**, so they run first: they are the dialect
+**P3 needs no attestor at all**, so it runs first: it is the dialect
 equivalent of the deterministic negative, sound at full breadth with no panel
-call and no control text, and a negative they settle costs nothing further.
+call and no control text, and a negative it settles costs nothing further. It
+is also now strong enough to settle a *positive*, which is what makes a family
+measurable for six calls rather than six plus five per control model.
+
+P4 is gone as a separate probe. "Do it again and compare" asked whether the
+model repeats itself, which a stubborn improviser also does; the square's
+diagonal cells ask the same question better and are paid for anyway.
 
 **Every control model is re-qualified on every run, for this family.** That is
 the operator's own requirement and it is also the method's: the stored record
@@ -44,11 +49,11 @@ from dataclasses import dataclass, field
 from polyglot.core.probe import attest
 from polyglot.core.probe.attest import Blind
 from polyglot.core.probe.corpus import Corpus
-from polyglot.core.probe.dialect import (CONSISTENCY_RUNS, BlindRead, Consistency,
-                                         ContrastRead, Conversion, DialectResult,
-                                         _designator_for, _produce, _producer_capability,
-                                         attest_tone, blind_for, consistency, convert,
-                                         convert_prompt)
+from polyglot.core.probe.dialect import (STABLE_AT, BlindRead, ContrastRead,
+                                         Conversion, DialectResult, Square,
+                                         _designator_for, _produce,
+                                         _producer_capability, attest_tone,
+                                         blind_for, convert, convert_prompt)
 from polyglot.core.probe.ladder_support import (accepted_codes,
                                                 indistinguishable_codes,
                                                 relative_codes)
@@ -82,18 +87,21 @@ HELP: dict[str, tuple[str, str]] = {
     ),
     "convert": (
         "Rewrite into the variety",
-        "Neutral text in, variety text out. The diff is the measurement and no "
+        "One arm's text, rewritten into one variety. The diff is the "
+        "measurement and no "
         "judge is involved — this is where a model says, in its own output, "
         "what it thinks the variety *is*. An empty diff is a negative settled "
         "locally; rewriting the whole passage is the opposite failure and is "
         "scored as a paraphrase, not a conversion.",
     ),
-    "consistency": (
-        "Same thing twice?",
-        "The conversion again, independently. A model cannot simulate "
-        "consistency it does not have: genuine command repeats its "
-        "substitutions, improvisation does not. Runs that changed nothing are "
-        "excluded, because two empty diffs agree perfectly and mean nothing.",
+    "square": (
+        "The four rewrites together",
+        "Each arm's text was rewritten into both varieties. Converting a text "
+        "into the variety it was just written in should change nothing; into "
+        "the other one it should change something. Both expectations are "
+        "certain by construction, so no judge is involved — and the two "
+        "cross-conversions should be mirrors of each other, because they are "
+        "the same alternation run in opposite directions.",
     ),
     "controls": (
         "Qualify the control model",
@@ -130,8 +138,9 @@ HELP: dict[str, tuple[str, str]] = {
 class State:
     produced: dict[str, str | None] = field(default_factory=dict)
     produced_order: list[str] = field(default_factory=list)
-    conversions: list[Conversion] = field(default_factory=list)
-    consistency: Consistency | None = None
+    #: (source tag, target tag) -> the conversion. The 2×2: each arm's text
+    #: rewritten into both varieties.
+    cells: dict[tuple[str, str], Conversion] = field(default_factory=dict)
     planned: bool = False
     competences: list[Competence] = field(default_factory=list)
     reads: list[BlindRead] = field(default_factory=list)
@@ -159,13 +168,24 @@ class DialectMachine:
 
     def __init__(self, *, scheme: Scheme, tag: str, engine: str, client,
                  attestors: list[str], varieties: list[Language],
-                 neutral_tag: str, scenario: str, corpus: Corpus,
+                 scenario: str, corpus: Corpus, neutral_tag: str | None = None,
                  record=None, forced_attestors: list[str] | None = None) -> None:
         lang = scheme.get(tag)
-        neutral = scheme.get(neutral_tag)
-        if lang is None or neutral is None:
-            raise KeyError(f"Unknown tag {tag!r} or {neutral_tag!r} in "
-                           f"scheme {scheme.meta.name!r}")
+        if lang is None:
+            raise KeyError(f"Unknown tag {tag!r} in scheme {scheme.meta.name!r}")
+        # **The umbrella is no longer part of the battery.** It used to be the
+        # conversion source — "neutral text" to be rewritten into a variety —
+        # and it was never neutral: it was generated by the model under test,
+        # so it was that model's own default variety wearing an umbrella tag.
+        # Whichever variety a model defaults to could therefore never show a
+        # conversion, and the baseline moved between runs because it was
+        # resampled each time. The square converts between the two arms
+        # instead, which has no privileged baseline at all.
+        #
+        # Still accepted so a caller that sends one is not an error, and still
+        # reported in the pre-flight as *not used*, because silently ignoring a
+        # parameter is how a caller comes to believe something it is not.
+        neutral = scheme.get(neutral_tag) if neutral_tag else None
 
         named = [v for v in varieties if not v.inclusive]
         if len(named) < 2:
@@ -192,31 +212,6 @@ class DialectMachine:
                 f"not the variety, and would look like dialect knowledge while "
                 f"being none. Contrast two varieties in one alphabet.")
         arm_script = next(iter(scripts))
-
-        # **The conversion source has to be in the arms' alphabet too.**
-        #
-        # P3 rewrites neutral text into the variety and *the diff is the
-        # measurement*. The umbrella tag carries its own script — `sr` is
-        # Cyrillic — so a Latin-script battery was handed Cyrillic text to
-        # rewrite. The model then did the only sensible thing and transliterated
-        # it, every token changed, and a correct conversion scored as
-        # `paraphrased, not converted`: a guaranteed false negative, and P4
-        # unscoreable behind it.
-        #
-        # Asking the neutral arm for the arms' alphabet fixes it at the source
-        # rather than at the scorer. Scoring the diff "by sense" instead would
-        # not: the model would still have been asked to do two jobs — convert
-        # *and* transliterate — and the variety's own alternations would still
-        # be buried in a wholly rewritten text. It would also cost a model call,
-        # and P3's whole value is that it settles negatives for free.
-        #
-        # Only the script is overridden, through `candidates_for` like every
-        # other designator, so "Serbian (Latin script)" is derived rather than
-        # spelled out here.
-        self.neutral_script_adjusted = (arm_script is not None
-                                        and neutral.script != arm_script)
-        if self.neutral_script_adjusted:
-            neutral = neutral.model_copy(update={"script": arm_script})
 
         self.arm_script = arm_script
         self.scheme, self.tag, self.engine, self.client = scheme, tag, engine, client
@@ -284,14 +279,13 @@ class DialectMachine:
             "test_type": self.test_type,
             "tag": self.tag, "language": self.lang.name,
             "designator": self.designator,
-            "neutral": {"tag": self.neutral.tag,
+            "neutral": None if self.neutral is None else {
+                        "tag": self.neutral.tag,
                         "designator": _designator_for(self.scheme, self.neutral),
-                        #: True when the umbrella tag's own alphabet is not the
-                        #: one both arms are written in, so the conversion
-                        #: source was asked for in theirs. Surfaced rather than
-                        #: done quietly: it changes what was sent, and the step
-                        #: that sent it is on the page.
-                        "script_adjusted": self.neutral_script_adjusted,
+                        #: The umbrella is accepted and not used. P3 converts
+                        #: between the two arms now, so there is no neutral
+                        #: source and no default-variety baseline.
+                        "used": False,
                         "script": self.arm_script},
             "varieties": [{"tag": v.tag, "region": v.region_name,
                            "designator": _designator_for(self.scheme, v),
@@ -305,11 +299,13 @@ class DialectMachine:
             "scenario": self.scenario,
             "abstain": sorted(self.abstain),
             "estimated_calls": {
-                # produce (neutral + named) + 2 conversions + 3 per control
-                # model + 2 attestations per model that qualifies.
-                "minimum": 1 + len(self.named) + CONSISTENCY_RUNS,
-                "typical": (1 + len(self.named) + CONSISTENCY_RUNS
-                            + 5 * len(self.field)),
+                # One produce per arm, four conversions, then 3 control calls
+                # per attestor and 2 attestations per model that qualifies.
+                # The minimum is the free half alone: identical arms stop the
+                # battery before a conversion, and a clean square settles a
+                # positive before a panel is paid for.
+                "minimum": len(self.named),
+                "typical": len(self.named) + 4 + 5 * len(self.field),
             },
         }
 
@@ -327,9 +323,8 @@ class DialectMachine:
                 if tag not in st.produced_order:
                     st.produced_order.append(tag)
             elif ex.kind == "convert":
-                st.conversions.append(ex.obj)
-            elif ex.kind == "consistency":
-                st.consistency = ex.obj
+                ctx = ex.request.get("context") or {}
+                st.cells[(str(ctx["source"]), str(ctx["target"]))] = ex.obj
             elif ex.kind == "controls":
                 st.competences.append(ex.obj)
             elif ex.kind == "identify":
@@ -350,13 +345,42 @@ class DialectMachine:
         panel = Panel(competences=list(st.competences))
         out = DialectResult(
             tag=self.tag, engine=self.engine, designator=self.designator,
-            conversions=st.consistency, reads=list(st.reads),
+            square=self._square(st), identical_arms=self._identical(st),
+            reads=list(st.reads),
             contrasts=list(st.contrasts), panel=panel,
             corpus_path=str(getattr(self.corpus, "path", "") or "") or None,
             sibling_tag=self.sibling.tag if self.sibling else None)
         if st.stop_note:
             out.notes.append(st.stop_note)
         return out
+
+    def _square(self, st: State) -> Square | None:
+        """The 2×2, as far as it has been filled in.
+
+        `None` until both arms exist: a square with one arm is not a square,
+        and offering a half-built one would let `distinguishes` be read off
+        two cells.
+        """
+        if self.sibling is None:
+            return None
+        if not st.produced.get(self.tag) or not st.produced.get(self.sibling.tag):
+            return None
+        sq = Square(subject=self.tag, sibling=self.sibling.tag)
+        sq.cells.update(st.cells)
+        return sq
+
+    def _identical(self, st: State) -> bool:
+        """Did the engine write the same text under both designators?
+
+        Whitespace-insensitive and nothing more: this is not a similarity
+        threshold. "Almost the same" is a measurement the square makes properly,
+        cell by cell; only *the same text twice* makes the pair unshowable.
+        """
+        if self.sibling is None:
+            return False
+        a = (st.produced.get(self.tag) or "").split()
+        b = (st.produced.get(self.sibling.tag) or "").split()
+        return bool(a) and a == b
 
     def _pair(self, st: State) -> tuple[str | None, str | None]:
         """The contrast pair: the sibling's text and the subject's.
@@ -388,17 +412,27 @@ class DialectMachine:
                 f"named blind from: {', '.join(self.blind.options)}; "
                 f"{len(self.field)} eligible control model(s)")
 
-        todo = [self.neutral, *self.named]
-        for variety in todo:
+        for variety in self.named:
             if variety.tag not in st.produced:
                 return self._plan_produce(variety)
 
-        if len(st.conversions) < CONSISTENCY_RUNS:
-            return self._plan_convert(st, len(st.conversions))
+        # The free, deterministic negative, and it comes before every paid
+        # call: one text under two designators is not a contrast pair. Shown to
+        # a panel it would turn the order control into a second identity
+        # control — the two halves being identical, nothing can follow the text
+        # rather than the slot — and attestors would be qualified without being
+        # tested. A run did exactly that and reported `production` off it.
+        if self._identical(st):
+            return self._free(
+                "verdict", PHASE_VERDICT,
+                f"Stop: {self.engine} wrote the same text for both varieties, "
+                f"so there is no pair to show anyone")
 
-        if st.consistency is None:
-            return self._free("consistency", PHASE_CONVERT,
-                              "Compare what the two rewrites changed")
+        square = self._square(st)
+        if square is not None and not square.complete:
+            for src, dst in square.plan:
+                if (src, dst) not in st.cells:
+                    return self._plan_convert(st, src, dst)
 
         pair = self._pair(st)
         if not all(pair):
@@ -446,18 +480,23 @@ class DialectMachine:
                         user=user, max_tokens=400, label=d)],
             context={"tag": variety.tag})
 
-    def _plan_convert(self, st: State, n: int) -> Planned:
-        text = st.produced.get(self.neutral.tag) or self.scenario
-        system = convert_prompt(self.lang, self.designator)
+    def _plan_convert(self, st: State, src: str, dst: str) -> Planned:
+        """One cell of the square: `src`'s text, rewritten into `dst`."""
+        target = self._arm(dst)
+        assert target is not None
+        text = st.produced.get(src) or self.scenario
+        designator = _designator_for(self.scheme, target)
+        system = convert_prompt(target, designator)
+        expect = ("it was written as this variety, so nothing should change"
+                  if src == dst else "the other arm's text, so something should")
         return Planned(
             kind="convert", phase=PHASE_CONVERT,
             title=HELP["convert"][0], explains=HELP["convert"][1],
-            summary=f"Rewrite the neutral text into {self.designator!r} "
-                    f"(run {n + 1} of {CONSISTENCY_RUNS})",
+            summary=f"{src} → {dst}: rewrite into {designator!r} — {expect}",
             calls=[Call(role="convert", model=self.engine, system=system,
                         user=text, max_tokens=600,
-                        label=f"convert {n + 1}")],
-            context={"run": n})
+                        label=f"{src}->{dst}")],
+            context={"source": src, "target": dst})
 
     def _plan_controls(self, st: State, attestor: str) -> Planned:
         first, second = self._pair(st)
@@ -558,7 +597,9 @@ class DialectMachine:
         (Latin script)" and then gated against Cyrillic would fail the gate for
         doing exactly what it was told.
         """
-        return self.neutral if tag == self.neutral.tag else self.scheme.get(tag)
+        if self.neutral is not None and tag == self.neutral.tag:
+            return self.neutral
+        return self.scheme.get(tag)
 
     def _do_produce(self, planned: Planned, sent: list[Call]) -> Executed:
         variety = self._arm(str(planned.context["tag"]))
@@ -582,29 +623,45 @@ class DialectMachine:
 
     def _do_convert(self, planned: Planned, sent: list[Call]) -> Executed:
         call = sent[0]
-        c = convert(client=self.client, engine=call.model, lang=self.lang,
-                    text=call.user, designator=self.designator, corpus=self.corpus,
-                    relatives=self.relatives, accept=self.accept,
-                    abstain=self.abstain, max_tokens=call.max_tokens,
-                    system=call.system)
-        n = int(planned.context["run"]) + 1
+        src = str(planned.context["source"])
+        dst = str(planned.context["target"])
+        target = self._arm(dst)
+        assert target is not None
+        c = convert(client=self.client, engine=call.model, lang=target,
+                    text=call.user,
+                    designator=_designator_for(self.scheme, target),
+                    corpus=self.corpus,
+                    relatives=relative_codes(self.scheme, target),
+                    accept=accepted_codes(target),
+                    abstain=indistinguishable_codes(target),
+                    max_tokens=call.max_tokens, system=call.system)
+        diagonal = src == dst
+        if not c.ok:
+            tone = "bad"
+        elif diagonal:
+            # A no-op is the *expected* answer on the diagonal, so an empty
+            # diff here is `ok` and a large one is the warning. The opposite of
+            # how an off-diagonal cell reads, which is why tone is not shared.
+            tone = "ok" if c.rate <= STABLE_AT else "warn"
+        else:
+            tone = "ok" if (c.rate > 0 and not c.paraphrased) else "bad"
+        met = ("unchanged, as expected" if diagonal and c.ok and c.rate <= STABLE_AT
+               else "changed, as expected" if not diagonal and c.ok
+               and c.rate > 0 and not c.paraphrased
+               else "paraphrased, not converted" if c.ok and c.paraphrased
+               else "no change" if c.ok and c.rate == 0
+               else "drifted" if c.ok else (c.error or "failed"))
         return self._make(
             planned,
-            summary=(f"run {n}: {len(c.edits)} edit(s), {c.rate:.0%} of the text"
-                     if c.ok else f"run {n}: {c.error}"),
-            tone=attest_tone(c.converted if c.ok else False),
-            result={**c.as_dict(), "before": c.before, "after": c.after},
+            summary=(f"{src} → {dst}: {len(c.edits)} edit(s), "
+                     f"{c.rate:.0%} of the text — {met}"
+                     if c.ok else f"{src} → {dst}: {c.error}"),
+            tone=tone,
+            result={**c.as_dict(), "source": src, "target": dst,
+                    "diagonal": diagonal, "expected":
+                        "unchanged" if diagonal else "changed",
+                    "before": c.before, "after": c.after},
             calls={"convert": 1}, obj=c)
-
-    def _do_consistency(self, planned: Planned, _sent) -> Executed:
-        st = self.state()
-        cons = consistency(st.conversions)
-        return self._make(
-            planned,
-            summary=(f"agreement {cons.agreement:.2f}" if cons.ok else
-                     "not scoreable: fewer than two runs changed anything"),
-            tone=attest_tone(cons.systematic if cons.ok else None),
-            result=cons.as_dict(), obj=cons)
 
     def _do_controls(self, planned: Planned, sent: list[Call]) -> Executed:
         from polyglot.core.probe.panel import qualify_attestor
@@ -794,7 +851,8 @@ class DialectMachine:
 
         adjusted = DialectResult(
             tag=out.tag, engine=out.engine, designator=out.designator,
-            conversions=out.conversions, reads=reads, contrasts=contrasts,
+            square=out.square, identical_arms=out.identical_arms,
+            reads=reads, contrasts=contrasts,
             panel=out.panel, corpus_path=out.corpus_path,
             sibling_tag=out.sibling_tag)
         return {

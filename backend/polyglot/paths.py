@@ -23,6 +23,12 @@ DATA = pathlib.Path(os.environ.get("POLYGLOT_DATA_DIR") or (ROOT / "data")).reso
 # -- authored, version-controlled: the instrument ------------------------------
 SCHEMES = ROOT / "schemes"
 MARKERS = ROOT / "markers"
+#: Which variety each family is contrasted against. Beside `markers/` because
+#: it is the same kind of thing: an authored claim that belongs in review, not
+#: a local setting. One file for every locale list — see `core/reference.py` —
+#: and a file of the same name under the data directory overrides it, for
+#: working on a decision before proposing it.
+REFERENCES = ROOT / "references"
 SPECS = DATA / "specs" / "specs.json"
 CONTROLS = DATA / "controls"
 

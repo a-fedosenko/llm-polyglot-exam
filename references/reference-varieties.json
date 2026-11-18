@@ -1,0 +1,78 @@
+{
+  "_about": {
+    "what": "The reference variety of each family: the one every other variety in its equivalence class is contrasted against. Turns an N×N dialect problem into N−1 pairs — Arabic's 26 regional tags are 325 pairs and 25 contrasts — and it is what makes two results in one family comparable, because they were measured against the same baseline.",
+    "not-a-ranking": "It is the contrast baseline, not the correct, best or standard variety. Nothing here is a claim about prestige or priority; it is a statement about what a measurement is relative to. The file is read by people whose own variety is on the other side of it.",
+    "keyed-by": "Equivalence class `iso639-3|script`. A reference is a statement about regions *within* one writing system — Serbian needs one per alphabet, and a contrast that crossed that line would measure the script rather than the variety.",
+    "keyed-on-region": "Entries name a REGION, not a tag, because a region code is the same fact in every locale list while tag spellings are not (`sr-rs-latn` here, `sr-Latn-RS` elsewhere). Seven classes hold two language subtags in one region — `ak-gh` and `tw-gh` — and those name an explicit `tag` instead.",
+    "not-per-scheme": "One file for every locale list. Which variety baselines a family does not change when you load a different list; only the spelling of the tag does, which is exactly what keying on the region avoids.",
+    "derivation": "Most families need no entry. Where the language subtag equals the region subtag — pt/PT, ru/RU, es/ES, de/DE, fr/FR, it/IT, nl/NL, ro/RO, tr/TR — the reference is derived in `core/reference.py` and nothing is recorded here. This file holds the families where that rule cannot fire, and the exceptions where it fires on the wrong member.",
+    "status": "A reference is a CLAIM and some of these are arguable. Every entry carries `reviewed: false` until a person who works in that family has looked at it.",
+    "three-states": "A region or tag means decided. `null` means decided that this family has no defensible reference. Absent means not decided yet — a gap, counted as one by `/api/reference`, and never silently treated as `null`."
+  },
+
+  "eng|Latn": {
+    "region": "US",
+    "why": "The rule cannot fire — there is no `en-EN`. US over GB: it is what CLDR likelySubtags resolves bare `en` to, and `markers/english.json` already expresses every sibling against the American forms, so a different choice here would contradict the marker sets.",
+    "reviewed": false
+  },
+
+  "ara|Arab": {
+    "region": "SA",
+    "why": "Operator decision. The alternative baseline is Modern Standard Arabic, which is not a region and so cannot be a member of this class; SA is the closest regional standard to it.",
+    "reviewed": false
+  },
+
+  "zho|Hans": {
+    "region": "CN",
+    "why": "Simplified Chinese. The class also holds a regionless `zh-hans`, which is a script label rather than a variety anything can be contrasted against.",
+    "reviewed": false
+  },
+
+  "zho|Hant": {
+    "region": "TW",
+    "why": "Traditional Chinese. TW over HK: Hong Kong written Chinese carries Cantonese lexis, a second dimension of difference that would make every contrast against it measure two things at once.",
+    "reviewed": false
+  },
+
+  "srp|Cyrl": {
+    "region": "RS",
+    "why": "The rule cannot fire: Serbian is `sr` and Serbia is `RS`. Serbia baselines both Serbian classes; Montenegro, Bosnia and Kosovo are the varieties contrasted against it.",
+    "reviewed": false
+  },
+
+  "srp|Latn": {
+    "region": "RS",
+    "why": "As `srp|Cyrl`, in the other alphabet. A reference never crosses a script class.",
+    "reviewed": false
+  },
+
+  "swe|Latn": {
+    "region": "SE",
+    "why": "The rule cannot fire: Swedish is `sv` and Sweden is `SE`. Finland and Åland Swedish are the varieties under contrast.",
+    "reviewed": false
+  },
+
+  "dan|Latn": {
+    "region": "DK",
+    "why": "The rule cannot fire: Danish is `da` and Denmark is `DK`.",
+    "reviewed": false
+  },
+
+  "ell|Grek": {
+    "region": "GR",
+    "why": "The rule cannot fire: Greek is `el` and Greece is `GR`. Cypriot Greek is the variety under contrast.",
+    "reviewed": false
+  },
+
+  "fas|Arab": {
+    "region": "IR",
+    "why": "The rule cannot fire: Persian is `fa` and Iran is `IR`. Dari is the variety under contrast.",
+    "reviewed": false
+  },
+
+  "aze|Latn": {
+    "tag": "az-az-latn",
+    "why": "A tag rather than a region, and an exception to the rule. `az` equals `AZ`, but this class holds both `az-AZ-Latn` and `az-AZ-Cyrl` — a Cyrillic tag filed under a Latin class, which is a defect in the loaded locale list. Region `AZ` would therefore match two members, and the rule would pick the Cyrillic one, making every contrast in the family measure the alphabet.",
+    "reviewed": false
+  }
+}

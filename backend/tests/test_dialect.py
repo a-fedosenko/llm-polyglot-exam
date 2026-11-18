@@ -1,9 +1,4 @@
-"""The dialect battery's setup, where the alphabet is not the variety.
-
-A digraphic family spans scripts: `sr-ME-Cyrl` and `sr-ME-Latn` are one variety
-written twice. Two things follow, and neither is catchable downstream — the
-manufactured controls pass either way, because the texts really are different.
-"""
+"""The dialect battery: the square, and the pairs it refuses to measure."""
 from __future__ import annotations
 
 import pytest
@@ -25,29 +20,6 @@ def battery(scheme, tag: str, other: str) -> DialectMachine:
         varieties=[scheme.get(tag), scheme.get(other)],
         neutral_tag="sr", scenario="A woman missed the morning bus.",
         corpus=Corpus(to_db=False))
-
-
-def test_the_conversion_source_is_asked_for_in_the_arms_alphabet(scheme):
-    """The bug this closes.
-
-    `sr` is Cyrillic, so a Latin-script battery was handed Cyrillic text to
-    rewrite. The model transliterated it — correctly, because it had been told
-    to write Latin — every token moved, and the conversion scored
-    `paraphrased, not converted`: a guaranteed false negative with P4
-    unscoreable behind it.
-    """
-    neutral = battery(scheme, "sr-rs-latn", "sr-me-latn").preflight()["neutral"]
-    assert neutral["tag"] == "sr", "it is still the umbrella tag"
-    assert neutral["script"] == "Latn"
-    assert "Latin" in neutral["designator"]
-    assert neutral["script_adjusted"] is True, \
-        "the override has to be visible: it changes what was sent"
-
-
-def test_a_same_script_pair_leaves_the_neutral_arm_alone(scheme):
-    neutral = battery(scheme, "sr-rs-cyrl", "sr-me-cyrl").preflight()["neutral"]
-    assert neutral["script_adjusted"] is False
-    assert "Cyrillic" in neutral["designator"]
 
 
 def test_arms_in_two_alphabets_are_refused(scheme):
@@ -72,3 +44,143 @@ def test_the_blind_menu_is_regions_not_scripts(scheme):
     the region — which is the thing under test."""
     pre = battery(scheme, "sr-rs-latn", "sr-me-latn").preflight()
     assert sorted(pre["options"]) == ["Montenegro", "Serbia"]
+
+
+# -- the square ----------------------------------------------------------------
+
+from polyglot.core.probe.dialect import Conversion, Square, diff  # noqa: E402
+
+
+def cell(before: str, after: str) -> Conversion:
+    c = Conversion(designator="x", before=before, after=after)
+    c.edits, c.rate = diff(before, after)
+    return c
+
+
+def square(aa, ab, bb, ba) -> Square:
+    sq = Square(subject="A", sibling="B")
+    sq.cells[("A", "A")] = cell(*aa)
+    sq.cells[("A", "B")] = cell(*ab)
+    sq.cells[("B", "B")] = cell(*bb)
+    sq.cells[("B", "A")] = cell(*ba)
+    return sq
+
+
+SAME = ("Žena je propustila jutarnji autobus. Pešačila je do posla po kiši. "
+        "Kada je stigla, kancelarija je bila zatvorena.")
+
+TA = "lepo mleko i voz"
+TB = "lijepo mlijeko i voz"
+
+
+def test_a_clean_square_distinguishes():
+    """Diagonals unchanged, off-diagonals moved: the model marks the difference
+    on demand, in both directions, with no attestor involved."""
+    sq = square((TA, TA), (TA, TB), (TB, TB), (TB, TA))
+    assert sq.stable and sq.moved
+    assert sq.distinguishes
+    assert sq.reading == "distinguishes"
+
+
+def test_the_two_directions_are_checked_for_being_mirrors():
+    """`lepo -> lijepo` one way and `lijepo -> lepo` the other is knowledge of a
+    specific alternation. Two unrelated edit sets are improvisation twice."""
+    sq = square((TA, TA), (TA, TB), (TB, TB), (TB, TA))
+    assert sq.mirror == 1.0 and sq.mirrored
+
+    noise = square((TA, TA), (TA, "lepo mleko i vlak"),
+                   (TB, TB), (TB, "lijepo mlijeko i tramvaj"))
+    assert noise.distinguishes, "it still moved both ways"
+    assert not noise.mirrored, "but the two directions do not undo each other"
+
+
+def test_changing_nothing_anywhere_is_not_a_distinction():
+    sq = square((TA, TA), (TA, TA), (TB, TB), (TB, TB))
+    assert not sq.distinguishes
+    assert sq.reading == "no-distinction"
+
+
+def test_changing_everything_including_the_diagonal_is_improvisation():
+    """The failure a single conversion could never tell from real command: a
+    model that rewrites something every time it is asked."""
+    sq = square((TA, "potpuno drugi tekst ovdje"), (TA, TB),
+                (TB, "sasvim drukciji tekst tamo"), (TB, TA))
+    assert not sq.stable
+    assert not sq.distinguishes
+    assert sq.reading == "improvisation"
+
+
+def test_a_half_built_square_claims_nothing():
+    sq = Square(subject="A", sibling="B")
+    sq.cells[("A", "B")] = cell(TA, TB)
+    assert not sq.complete and not sq.distinguishes
+    assert sq.reading == "incomplete"
+
+
+# -- identical arms ------------------------------------------------------------
+
+def test_identical_arms_stop_the_battery_before_any_attestor(scheme, monkeypatch):
+    """One text under two designators is not a contrast pair.
+
+    Shown to a panel it turns the order control into a second identity control
+    — with both halves the same there is nothing to follow but the slot — so
+    attestors get qualified without being tested. A real run did that and
+    reported `production` off a single vote.
+    """
+    from conftest import ScriptedClient
+
+    m = battery(scheme, "sr-rs-latn", "sr-me-latn")
+    # Real Serbian, so the gate passes and the stop is about the *pair* rather
+    # than about one arm failing to be produced at all.
+    m.client = ScriptedClient({"generation": SAME})
+    for _ in range(12):
+        planned = m.plan()
+        if planned is None:
+            break
+        m.execute(planned)
+
+    out = m.result()
+    assert out.identical_arms is True
+    assert out.verdict.value == "no-evidence"
+    assert out.confidence == "high", "nothing about this reading is uncertain"
+    assert m.state().calls["control"] == 0, "no attestor was paid"
+
+
+# -- the reference variety -----------------------------------------------------
+
+from polyglot.core import reference as ref  # noqa: E402
+
+
+def test_a_recorded_reference_is_found_by_region_not_by_tag_spelling(scheme):
+    """Region, because a region code is the same fact in every locale list
+    while tag spellings are not."""
+    r = ref.reference_for(scheme, "srp|Latn")
+    assert r.tag == "sr-rs-latn" and r.basis == "recorded"
+    assert ref.reference_for(scheme, "srp|Cyrl").tag == "sr-rs-cyrl", \
+        "one region, resolved separately in each script class"
+
+
+def test_the_rule_covers_the_families_that_need_no_entry(scheme):
+    r = ref.reference_for(scheme, "por|Latn")
+    assert r.tag == "pt-pt" and r.basis == "rule"
+    assert ref.reference_for(scheme, "rus|Cyrl").tag == "ru-ru"
+
+
+def test_a_region_that_matches_two_members_falls_through_to_a_tag(scheme):
+    """`aze|Latn` holds az-AZ-Latn and az-AZ-Cyrl — a Cyrillic tag filed under
+    a Latin class. Region AZ matches both, so the entry names the tag; picking
+    the Cyrillic one would make every contrast measure the alphabet."""
+    r = ref.reference_for(scheme, "aze|Latn")
+    assert r.tag == "az-az-latn" and r.basis == "recorded"
+
+
+def test_an_undecided_family_is_provisional_and_says_so(scheme):
+    r = ref.reference_for(scheme, "afr|Latn")
+    assert r.basis == "provisional"
+    assert r.decided is False, "a placeholder must never read as a decision"
+
+
+def test_coverage_counts_only_families_that_can_be_contrasted(scheme):
+    cov = ref.coverage(scheme)
+    assert cov["families"] == cov["decided"] + len(cov["provisional"])
+    assert "srp|Latn" not in cov["provisional"]

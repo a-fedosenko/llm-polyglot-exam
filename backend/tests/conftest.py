@@ -52,6 +52,28 @@ class ScriptedClient:
         return "other"
 
 
+def varied_generation(base: str):
+    """A generation answer that differs per *variety*, as a real model's would.
+
+    A fixture that returns one string for every designator makes the two arms
+    of a dialect battery identical, and the battery now stops on that before it
+    pays a panel — correctly, because one text under two designators is not a
+    contrast pair. The variation is keyed on the parenthesised region in the
+    designator ("Portuguese (Brazil)"), so capability runs, whose designators
+    name no region, are untouched.
+    """
+    import re
+
+    def answer(_n, _model, system, _prompt) -> str:
+        m = re.search(r"You are a native speaker of ([^.\n]*\(([^)]+)\))", system or "")
+        if not m:
+            return base
+        region = m.group(2)
+        return base.replace("ônibus", f"ônibus-{region.split(',')[0].strip().lower()}")
+
+    return answer
+
+
 #: The control set the tests measure against.
 #:
 #: Pinned rather than loaded from disk, and the reason is a failure this suite

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from polyglot import paths
 from polyglot.core import bootstrap, hardware
 from polyglot.core import discovery
+from polyglot.core import reference as reference_mod
 from polyglot.core.client import NOT_CONFIGURED_MESSAGE, is_configured
 from polyglot.core.probe import lid
 from polyglot.core.probe.specs import load_specs
@@ -200,6 +201,11 @@ def language(tag: str, engine: str | None = None, scheme: str | None = None) -> 
         "family": [{"tag": l.tag, "region": l.region_name, "script": l.script,
                     "inclusive": l.inclusive} for l in family],
         "umbrella": next((l.tag for l in family if l.inclusive), None),
+        #: What a dialect battery contrasts this tag against by default, and
+        #: on what basis. `provisional` means nobody has decided this family's
+        #: reference and the first member is standing in — the page says so
+        #: rather than presenting a placeholder as a decision.
+        "reference": reference_mod.reference_of(sch, lang).as_dict(),
         "known": known,
         "specs": [s.model_dump() for s in load_specs()],
     }
@@ -536,6 +542,29 @@ def promote(verdict_id: int) -> dict:
         if row is None:
             raise HTTPException(404, f"No verdict {verdict_id}")
         return _verdict_dict(row)
+
+
+# -- reference varieties -------------------------------------------------------
+
+@app.get("/api/reference")
+def reference(scheme: str | None = None) -> dict:
+    """Which variety each family is contrasted against, and how much is decided.
+
+    The provisional list is the work queue: those families have a reference only
+    because something had to be first, and a measurement taken against a
+    placeholder is comparable to other measurements against the same
+    placeholder and to nothing else.
+    """
+    sch = load_scheme(scheme or settings.scheme)
+    cov = reference_mod.coverage(sch)
+    return {
+        "scheme": sch.meta.name,
+        **cov,
+        "references": {
+            cls: reference_mod.reference_for(sch, cls).as_dict()
+            for cls in sorted({l.cls for l in sch.languages.values()})
+        },
+    }
 
 
 # -- coverage: every tag, and what is stored about it ---------------------------

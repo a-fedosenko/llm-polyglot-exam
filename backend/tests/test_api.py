@@ -6,7 +6,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import ScriptedClient
+from conftest import ScriptedClient, varied_generation
 from polyglot.api.app import app
 
 PT = ("O ônibus atrasou por causa da chuva forte. Ela chegou ao escritório "
@@ -16,7 +16,9 @@ PT = ("O ônibus atrasou por causa da chuva forte. Ela chegou ao escritório "
 @pytest.fixture
 def client(db, monkeypatch):
     answers = {
-        "generation": PT,
+        # Varies by variety: two arms that come back identical are not a pair,
+        # and the battery stops on that before any attestor is paid.
+        "generation": varied_generation(PT),
         "convert": PT.replace("ônibus", "autocarro"),
         "backtranslation": "The bus was late because of heavy rain. She reached "
                            "the office after nine.",

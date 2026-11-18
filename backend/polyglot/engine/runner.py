@@ -253,11 +253,11 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
         subject = scheme.get(tag)
         if subject is None:
             raise RunError(f"Unknown tag {tag!r}.")
+        # No longer required. The conversion probe used to rewrite the
+        # umbrella's text into the variety, which made the model's own default
+        # variety the silent baseline; it now converts between the two arms, so
+        # a family with no umbrella tag is testable like any other.
         neutral = neutral_tag or _umbrella_for(scheme, subject)
-        if neutral is None:
-            raise RunError(
-                f"No umbrella tag for {tag!r} to convert from. The conversion "
-                f"probe rewrites neutral text into the variety, so it needs one.")
         # Named explicitly, never defaulted to "everything eligible". The
         # default used to be the whole field, and an unattended gesture that
         # spends five calls per model is the wrong kind of convenient.

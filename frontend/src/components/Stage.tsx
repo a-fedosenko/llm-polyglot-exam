@@ -109,8 +109,7 @@ function Body({ step, r, adjudication, onOverrideFact, onOverrideAttestor,
       return <ProduceStep r={r} />;
     case "convert":
       return <ConvertStep r={r} />;
-    case "consistency":
-      return <ConsistencyStep r={r} />;
+
     case "controls":
       return <ControlsStep r={r} />;
     case "identify":
@@ -686,16 +685,31 @@ function ProduceStep({ r }: any) {
 }
 
 function ConvertStep({ r }: any) {
+  // One cell of the square, and which cell it is decides what a good answer
+  // looks like. On the diagonal the text was just written as this variety, so
+  // changing nothing is the *right* answer; off it, changing nothing is the
+  // negative. A badge that read "changed nothing → warn" in both places would
+  // call the expected answer a problem half the time.
+  const diagonal = !!r.diagonal;
+  const changed = (r.rate ?? 0) > 0;
+  const met = diagonal
+    ? !r.paraphrased && (r.rate ?? 0) <= 0.1
+    : changed && !r.paraphrased;
   return (
     <>
       <Section
-        title="What it changed"
-        info="The diff is the measurement, and no judge is involved. This is where the model says, in its own output, what it thinks the variety is — which is what makes this the most defensible probe in the battery: a reviewer who distrusts the number can disagree with the substitutions concretely."
+        title={diagonal ? "What survived the round trip" : "What it changed"}
+        info={diagonal
+          ? "A diagonal cell of the square: this text was generated as this very variety, so rewriting it into the same variety should change nothing. Drift here means the model does not agree with itself about what the variety is — which is what the old self-consistency probe asked, arriving for free."
+          : "An off-diagonal cell: the other arm's text, rewritten into this variety. It should move, and what moved is the model saying in its own output what it thinks the difference is. No judge is involved, and a reviewer who distrusts the number can disagree with the substitutions concretely."}
         right={
-          <Badge tone={r.paraphrased ? "bad" : r.converted ? "ok" : "warn"}>
+          <Badge tone={met ? "ok" : r.paraphrased ? "bad" : diagonal ? "warn" : "bad"}>
             {r.paraphrased ? "paraphrased, not converted"
-              : r.converted ? `${r.edits?.length} edit${r.edits?.length === 1 ? "" : "s"}`
-              : "changed nothing"}
+              : diagonal
+                ? (met ? "unchanged, as expected"
+                       : `drifted — ${r.edits?.length} edit${r.edits?.length === 1 ? "" : "s"}`)
+                : (changed ? `${r.edits?.length} edit${r.edits?.length === 1 ? "" : "s"}`
+                           : "changed nothing")}
           </Badge>
         }
       >
@@ -710,14 +724,21 @@ function ConvertStep({ r }: any) {
             ))}
           </ul>
         ) : (
-          <p className="rounded-md border border-warn/30 bg-warn-soft p-2.5 text-[12.5px] text-warn">
+          <p className={`rounded-md border p-2.5 text-[12.5px] ${
+            r.error ? "border-bad/30 bg-bad-soft text-bad"
+              : diagonal ? "border-ok/30 bg-ok-soft text-ok"
+              : "border-warn/30 bg-warn-soft text-warn"}`}>
             {r.error
               ? r.error
-              : "The model returned the text unchanged. That is a real answer — “nothing in this text needs to change” — and it is a negative settled locally with no judge call."}
+              : diagonal
+                ? "Returned unchanged, which is what this cell is for: the text was written as this variety, so there was nothing to change. The model agrees with itself."
+                : "The model returned the other arm's text unchanged. That is a real answer — “nothing in this text needs to change” — and it is a negative settled locally with no judge call."}
           </p>
         )}
         <p className="mt-2 text-[11.5px] text-ink-faint">
-          touched {((r.rate ?? 0) * 100).toFixed(0)}% of the tokens
+          <span className="font-mono">{r.source} → {r.target}</span>
+          {" · "}touched {((r.rate ?? 0) * 100).toFixed(0)}% of the tokens
+          {" · expected to "}{diagonal ? "stay the same" : "change"}
           {" · "}above 50% a rewrite stops being a conversion and is scored as a paraphrase
         </p>
       </Section>
@@ -729,49 +750,6 @@ function ConvertStep({ r }: any) {
         </div>
       )}
     </>
-  );
-}
-
-function ConsistencyStep({ r }: any) {
-  return (
-    <Section title="Did it do the same thing twice?"
-             info="A model cannot simulate consistency it does not have: genuine command repeats its substitutions, improvisation does not. Runs that changed nothing are excluded — two empty diffs agree perfectly and mean nothing.">
-      <div className="card p-4">
-        <div className="flex items-baseline gap-3">
-          <span className={`text-[26px] font-semibold tabular-nums ${
-            r.agreement === null ? "text-ink-faint"
-              : r.systematic ? "text-ok" : "text-warn"}`}>
-            {r.agreement === null ? "—" : r.agreement.toFixed(2)}
-          </span>
-          <span className="text-[13px] text-ink-soft">
-            {r.agreement === null
-              ? "not scoreable: fewer than two runs changed anything"
-              : r.systematic
-                ? "systematic — the same substitutions both times"
-                : "improvised — the two runs disagreed about what the variety requires"}
-          </span>
-        </div>
-      </div>
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
-        {(r.runs ?? []).map((run: any, i: number) => (
-          <div key={i} className="rounded-md border border-line p-2.5">
-            <div className="label">run {i + 1}</div>
-            <ul className="space-y-0.5 font-mono text-[12px]">
-              {(run.edits ?? []).map((e: [string, string], j: number) => (
-                <li key={j}>
-                  <span className="text-bad line-through">{e[0] || "∅"}</span>
-                  <span className="text-ink-faint"> → </span>
-                  <span className="text-ok">{e[1] || "∅"}</span>
-                </li>
-              ))}
-              {!(run.edits ?? []).length && (
-                <li className="text-ink-faint">no edits</li>
-              )}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </Section>
   );
 }
 
@@ -913,14 +891,21 @@ function DialectVerdictStep({ r }: any) {
                  state={r.identified?.agreed} detail={votes(r.identified)} />
           <Probe name="P2 contrast pair"
                  state={r.separated?.agreed} detail={votes(r.separated)} />
-          <Probe name="P3 conversion"
-                 state={r.conversion?.runs?.some((x: any) => x.converted) ?? null}
-                 detail={`${r.conversion?.runs?.filter((x: any) => x.converted).length ?? 0} of ${r.conversion?.runs?.length ?? 0} runs changed something`} />
-          <Probe name="P4 self-consistency"
-                 state={r.conversion?.agreement === null ? null : r.conversion?.systematic}
-                 detail={r.conversion?.agreement === null
-                   ? "not scoreable"
-                   : `agreement ${r.conversion?.agreement?.toFixed(2)}`} />
+          <Probe name="P3 the square"
+                 state={r.conversion?.distinguishes ?? null}
+                 detail={{
+                   distinguishes: "diagonals held, both cross-conversions moved",
+                   "no-distinction": "nothing moved in any of the four cells",
+                   improvisation: "every cell moved, including the diagonals — rewriting, not marking",
+                   unstable: "the diagonals drifted: the model does not agree with itself about the variety",
+                   incomplete: "fewer than four cells ran",
+                 }[r.conversion?.reading as string] ?? "not run"} />
+          <Probe name="P3b mirror"
+                 state={r.conversion?.mirror === null || r.conversion?.mirror === undefined
+                   ? null : r.conversion?.mirrored}
+                 detail={r.conversion?.mirror == null
+                   ? "nothing to mirror: at least one direction made no edits"
+                   : `the two directions agree ${r.conversion.mirror.toFixed(2)} after reversing one`} />
           <Probe name="P5 marker grounding"
                  state={r.grounding?.cited ? !r.grounding.unreliable : null}
                  detail={r.grounding?.cited

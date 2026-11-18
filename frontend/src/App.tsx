@@ -539,34 +539,19 @@ function Plan({ plan, testType }: { plan: any; testType: string }) {
               {(plan.options ?? []).join(" vs ")}
             </span>
           </Row>
-          {plan.neutral && (
-            <Row label="rewritten from">
-              <span className="font-mono text-[12px] text-ink-soft">
-                {plan.neutral.designator}
+          {plan.neutral?.used === false && (
+            <Row label="umbrella">
+              <span className="font-mono text-[12px] text-ink-faint">
+                {plan.neutral.tag} — not used
               </span>
-              {plan.neutral.script_adjusted && (
-                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                  The umbrella tag <span className="font-mono">{plan.neutral.tag}</span>{" "}
-                  is written in another alphabet, so the conversion source was
-                  asked for in this pair's. Handing the rewrite text in the
-                  wrong script makes a correct conversion score as a paraphrase:
-                  every token moves, and what moved is transliteration rather
-                  than the variety.
-                </p>
-              )}
-            </Row>
-          )}
-          <Row label="control models">
-            <span className="font-mono text-[12px] text-ink-soft">
-              {(plan.attestors ?? []).join(", ") || "none eligible"}
-            </span>
-          </Row>
-          {plan.dropped_by_family_guard?.length > 0 && (
-            <Row label="dropped">
-              <span className="text-[11.5px] text-ink-faint">
-                {plan.dropped_by_family_guard.join(", ")} — a model may not grade
-                its own family's output
-              </span>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                The conversion probe used to rewrite the umbrella's text into
+                the variety. It was never neutral — the model under test wrote
+                it, so it was that model's own default variety, and whichever
+                variety a model defaults to could never show a conversion. The
+                square converts between the two arms instead, so there is no
+                privileged baseline.
+              </p>
             </Row>
           )}
         </>
