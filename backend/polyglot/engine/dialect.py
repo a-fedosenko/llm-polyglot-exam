@@ -322,9 +322,17 @@ class DialectMachine:
             return None
 
         if not st.planned:
+            # Two different lists, and the old line conflated them: the arm this
+            # variety is contrasted against is the *sibling*, while
+            # `blind.options` is the answer menu a control model picks its name
+            # from — which contains both arms, and so read as "Spain against
+            # Mexico and Spain". Summary text only; nothing here is sent.
+            against = (repr(_designator_for(self.scheme, self.sibling))
+                       if self.sibling else "no named sibling")
             return self._free(
                 "plan", PHASE_PLAN,
-                f"{self.designator!r} against {list(self.blind.options)!r}; "
+                f"{self.designator!r} against {against}; "
+                f"named blind from: {', '.join(self.blind.options)}; "
                 f"{len(self.field)} eligible control model(s)")
 
         todo = [self.neutral, *self.named]

@@ -26,17 +26,23 @@ export interface Setup {
  *
  * Three bands, and the order is the argument:
  *
- *   model, language, test   identical for both tests, and each narrows what
- *                           follows. The engine decides who is eligible to
- *                           judge it; the language decides whether a dialect
- *                           test is answerable at all.
- *   the instrument          the half that *differs* by test type, so it belongs
- *                           below the choice that selects it, not beside it.
+ *   what is measured        model, test, language — and for a dialect battery
+ *                           the variety it is contrasted against, which belongs
+ *                           beside the language rather than a band below it,
+ *                           because the two name one pair. Each narrows what
+ *                           follows: the test decides which languages are
+ *                           answerable at all, the language decides what there
+ *                           is to contrast.
+ *   who measures it         readers and judge, or the control panel — the half
+ *                           that *differs* by test type.
  *   mode, then start        last, because mode is the only decision here that
  *                           changes nothing measured.
  *
  * Reading order carries that on its own; the bands were numbered for a while
- * and the numerals were furniture to look past rather than read.
+ * and the numerals were furniture to look past rather than read. The second
+ * band's own heading went the same way: reader, fallback and judge sit under
+ * their own labels, in the style of the band above, and three labelled selects
+ * in a row are already legible as one group without a word naming it.
  *
  * **Every control is the same control.** Reader, fallback and judge are three
  * identical selects, because they are three answers to the same kind of
@@ -48,7 +54,9 @@ export interface Setup {
  * **The instrument stays visible.** A verdict is only comparable to another
  * measured through the same judge and the same reader; both are stored on every
  * row. They used to live in an env file, which is how a run comes to be graded
- * by something nobody remembers choosing. */
+ * by something nobody remembers choosing. Dropping the band heading does not
+ * dim them — the selects are what was ever visible; what it dropped is a label
+ * over controls that already name themselves. */
 export function SetupBar({ onStart, busy, disabled, locked }: {
   onStart: (s: Setup) => void;
   busy: boolean;
@@ -83,6 +91,7 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   const [attestors, setAttestors] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
   const [varieties, setVarieties] = useState<string[]>([]);
+  const [contrastQuery, setContrastQuery] = useState("");
 
   // The model list, and a proposed instrument for whichever engine is selected.
   useEffect(() => {
@@ -135,6 +144,17 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
 
   const known = detail?.known?.[test];
   const family = (detail?.family ?? []).filter((f: any) => !f.inclusive);
+  // The opposing arm is the only thing there is to choose: the subject is
+  // always arm one, so it is not offered again as something to pick.
+  const siblings = family.filter((f: any) => f.tag !== tag);
+  const contrast = siblings.find((f: any) => varieties.includes(f.tag)) ?? null;
+  // Filtered here rather than over the API: a family is a handful of rows that
+  // are already loaded, and a round trip to narrow six of them would be slower
+  // than the typing.
+  const matchingSiblings = siblings.filter((f: any) => {
+    const q = contrastQuery.trim().toLowerCase();
+    return !q || `${f.tag} ${f.region ?? ""}`.toLowerCase().includes(q);
+  });
   const eligible = models.filter(
     (m) => !proposal?.excluded_by_family_guard.includes(m.id));
 
@@ -169,47 +189,68 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   /** Everything the dismissed "Why these?" button used to hold. It was a button
    *  only because the bubble was too small for it, which is the wrong way
    *  round: this is reference text, read once, and it belongs where the term
-   *  it explains is. */
-  const instrumentHelp = (
+   *  it explains is.
+   *
+   *  Two halves, because the band that used to carry both as one "Instrument"
+   *  heading no longer exists. Comparability is about the judge and the reader
+   *  and hangs off the judge; which models are *offered* applies to every
+   *  select here, and hangs off whichever one grades. */
+  const comparabilityHelp = (
     <>
       A verdict is only comparable to another measured through the same judge,
       the same reader and the same method version. All three are stored on every
       row, and it is not a formality — the same engine read by two qualified
       readers disagreed on tier for 13% of 136 languages. Changing one here makes
       this run a <i>different</i> measurement rather than a better one.
-      {proposal && (
+    </>
+  );
+
+  const offeringHelp = proposal && (
+    <>
+      <b>Why these.</b> {proposal.rule}
+      {proposal.excluded_by_family_guard.length > 0 && (
         <>
           <br /><br />
-          <b>Why these.</b> {proposal.rule}
-          {proposal.excluded_by_family_guard.length > 0 && (
-            <>
-              <br /><br />
-              <b>Not offered</b>, because a model may not grade or read back its
-              own family's output:{" "}
-              <span className="font-mono text-[11px]">
-                {proposal.excluded_by_family_guard.join(", ")}
-              </span>
-            </>
-          )}
-          <br /><br />
-          <b>Model list</b> from the {source}
-          {binding
-            ? " — binding: a name absent from it has no endpoint and no key."
-            : " — advisory: it is the gateway's opinion, and a name missing from"
-              + " it is still worth trying."}
+          <b>Not offered</b>, because a model may not grade or read back its
+          own family's output:{" "}
+          <span className="font-mono text-[11px]">
+            {proposal.excluded_by_family_guard.join(", ")}
+          </span>
         </>
       )}
+      <br /><br />
+      <b>Model list</b> from the {source}
+      {binding
+        ? " — binding: a name absent from it has no endpoint and no key."
+        : " — advisory: it is the gateway's opinion, and a name missing from"
+          + " it is still worth trying."}
     </>
   );
 
   return (
     <div className="border-b border-line bg-panel">
-      {/* 1-3: the same for both tests, and each narrows what follows. */}
+      {/* Each choice narrows what follows: the test decides which languages
+          are answerable at all, and the language decides what there is to
+          contrast it against. */}
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3 px-4 py-2.5">
         <Field label="Model under test"
                info="Every later choice is made relative to this one: a model never reads back or grades its own family's output, because that measures self-consistency and reports it as agreement.">
           <ModelPick models={models} value={engine} locked={!!locked}
                      onChange={(v) => { setTouched(false); setEngine(v); }} />
+        </Field>
+
+        <Field label="Test"
+               info={<>
+                 <b>Language capability</b> asks whether the model can write the
+                 language at all: generate, gate, back-translate, judge the facts.
+                 <br /><br />
+                 <b>Dialect support</b> asks whether it marks <i>this</i> variety:
+                 generate, then have control models judge it blind.
+               </>}>
+          <Segment value={test} locked={!!locked}
+                   onChange={(v) => { setTest(v as TestType); setTag(""); }}
+                   options={[["capability", "Language capability"],
+                             ["dialect", "Dialect support"]]} />
         </Field>
 
         <Field label="Language"
@@ -231,31 +272,66 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
           />
         </Field>
 
-        <Field label="Test"
-               info={<>
-                 <b>Language capability</b> asks whether the model can write the
-                 language at all: generate, gate, back-translate, judge the facts.
-                 <br /><br />
-                 <b>Dialect support</b> asks whether it marks <i>this</i> variety:
-                 generate, then have control models judge it blind.
-               </>}>
-          <Segment value={test} locked={!!locked}
-                   onChange={(v) => { setTest(v as TestType); setTag(""); }}
-                   options={[["capability", "Language capability"],
-                             ["dialect", "Dialect support"]]} />
-        </Field>
+        {/* Only a dialect battery has a second arm, so it only appears
+            for one of the two tests — beside the variety it is held up
+            against, because that pair is one decision made twice. */}
+        {test === "dialect" && (
+          <Field label="Contrast with"
+                 info={<>
+                   The language to the left is the other arm and is not
+                   repeated here — a battery whose subject is not an arm
+                   produces no text for the subject at all, so it is never a
+                   choice. This is the one arm there is anything to decide
+                   about.
+                   <br /><br />
+                   Exactly one, which is why it is a dropdown and not a set of
+                   toggles: a pair is what the contrast probe compares, and
+                   offering a second tick for a question that takes one answer
+                   invites a click that has to be taken back.
+                   <br /><br />
+                   The umbrella tag is never offered: it is the conversion
+                   source, and pairing it against a variety leaves one
+                   answerable option, which is not a question.
+                 </>}>
+            {!tag ? (
+              <div className="flex h-[30px] items-center text-[11px] text-ink-faint">
+                pick a language first
+              </div>
+            ) : siblings.length === 0 ? (
+              <div className="flex h-[30px] items-center text-[11px] text-warn">
+                no named sibling to contrast {tag} against
+              </div>
+            ) : (
+              <Combo
+                value={contrast
+                  ? `${contrast.tag}${contrast.region ? ` — ${contrast.region}` : ""}`
+                  : ""}
+                query={contrastQuery} onQuery={setContrastQuery}
+                locked={!!locked} width="w-72"
+                placeholder="search varieties…"
+                items={matchingSiblings} keyOf={(f: any) => f.tag}
+                onPick={(f: any) => { if (!locked) setVarieties([tag, f.tag]); }}
+                render={(f: any) => (
+                  <span className="flex items-baseline gap-2">
+                    <span className="w-24 shrink-0 font-mono text-[12px] text-ink-soft">{f.tag}</span>
+                    <span className="text-[13px] text-ink">{f.region ?? ""}</span>
+                  </span>
+                )}
+              />
+            )}
+          </Field>
+        )}
       </div>
 
-      {/* 4: the half that differs by test type, below the choice that selects it. */}
-      <div className="flex items-start gap-3 border-t border-line-soft px-4 py-2">
-        <GroupLabel label={test === "capability" ? "Instrument" : "Dialect setup"}
-                    info={instrumentHelp} wide />
-
-        <div className="grid min-w-0 flex-1 grid-cols-[6rem_minmax(0,1fr)]
-                        items-center gap-x-3 gap-y-1.5 text-[12px]">
-          {test === "capability" ? (
-            <>
-              <Row label="reader"
+      {/* Who measures it. No band heading: under its own label each select
+          reads as the same kind of control as the band above, which is exactly
+          what it is, and the heading was a word to step over on the way to the
+          only things here that are decisions. */}
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3 border-t
+                      border-line-soft px-4 py-2.5">
+        {test === "capability" ? (
+          <>
+            <Field label="Reader"
                    info={<>
                      Translates the model's output back into the pivot language
                      so the judge can grade it without reading the target
@@ -267,17 +343,17 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                      known Chuvash returned “A man is walking. He is wearing a
                      white shirt.”
                    </>}>
-                <Pick models={eligible} binding={binding} value={reader}
-                      locked={!!locked}
-                      onChange={(v) => choose(() => {
-                        if (v === fallback) setFallback("");
-                        setReader(v);
-                      })} />
-              </Row>
+              <Pick models={eligible} binding={binding} value={reader}
+                    locked={!!locked}
+                    onChange={(v) => choose(() => {
+                      if (v === fallback) setFallback("");
+                      setReader(v);
+                    })} />
+            </Field>
 
-              <Row label="fallback"
+            <Field label="Fallback"
                    info={<>
-                     Tried only if the reader above cannot be qualified for this
+                     Tried only if the reader cannot be qualified for this
                      language, and it costs nothing otherwise. Worth setting
                      because qualification is per <i>language</i>, not per model:
                      no single model reads every language, and one that
@@ -287,84 +363,65 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                      recorded on the verdict. With no fallback, a reader that
                      cannot be qualified means the result is `unverified`.
                    </>}>
-                <Pick models={eligible.filter((m) => m.id !== reader)}
-                      binding={binding} value={fallback} locked={!!locked}
-                      none="none — unverified if the reader fails"
-                      onChange={(v) => choose(() => setFallback(v))} />
-              </Row>
+              <Pick models={eligible.filter((m) => m.id !== reader)}
+                    binding={binding} value={fallback} locked={!!locked}
+                    none="none — unverified if the reader fails"
+                    onChange={(v) => choose(() => setFallback(v))} />
+            </Field>
 
-              <Row label="judge"
-                   info="Grades fact recall on the back-translation. It reads only the pivot language, never the target, and is never the model under test.">
+            <Field label="Judge" wide
+                   info={<>
+                     Grades fact recall on the back-translation. It reads only
+                     the pivot language, never the target, and is never the model
+                     under test.
+                     <br /><br />
+                     {comparabilityHelp}
+                     {offeringHelp && <><br /><br />{offeringHelp}</>}
+                   </>}>
+              <div className="flex flex-wrap items-center gap-2">
                 <Pick models={eligible} binding={binding} value={judge}
                       locked={!!locked}
                       onChange={(v) => choose(() => setJudge(v))} />
                 {judge && (judge === reader || judge === fallback) && (
-                  <span className="ml-1 text-[11px] text-warn">
+                  <span className="text-[11px] text-warn">
                     also a reader — it would be grading its own translation
                   </span>
                 )}
-              </Row>
-            </>
-          ) : (
-            <>
-              <Row label="contrast with"
-                   info={<>
-                     The variety from step 2 is one arm and cannot be dropped —
-                     a battery whose subject is not an arm produces no text for
-                     the subject at all. Choose what it is held up against.
-                     <br /><br />
-                     The umbrella tag is never offered: it is the conversion
-                     source, and pairing it against a variety leaves one
-                     answerable option, which is not a question.
-                   </>}>
-                {!tag ? (
-                  <span className="text-[11px] text-ink-faint">pick a language first</span>
-                ) : (
-                  <>
-                    <span className="chip border-accent bg-accent-soft font-mono
-                                     text-accent" title="The variety under test.">
-                      {tag}{detail?.language?.region_name ? ` · ${detail.language.region_name}` : ""}
-                    </span>
-                    <span className="px-1 text-ink-faint" aria-hidden>vs</span>
-                    {family.filter((f: any) => f.tag !== tag).map((f: any) => (
-                      <Toggle key={f.tag} on={varieties.includes(f.tag)}
-                              label={f.tag + (f.region ? ` · ${f.region}` : "")}
-                              onClick={() => { if (!locked) setVarieties([tag, f.tag]); }} />
-                    ))}
-                  </>
-                )}
-              </Row>
-
-              <Row label={`controls ${attestors.length}/${MAX_PANEL}`}
-                   info={<>
-                     The models that judge the dialect, blind. Unlike a reader
-                     chain, <b>every one of these answers</b> — they are a panel,
-                     not a fallback — and each costs three control calls plus two
-                     attestations. A panel of one is still reported at low
-                     confidence, because one judge is one opinion.
-                   </>}>
-                {eligible.map((m) => {
-                  const on = attestors.includes(m.id);
-                  const full = !on && attestors.length >= MAX_PANEL;
-                  return (
-                    <Toggle key={m.id} on={on} label={m.id} dim={full}
-                            onClick={() => choose(() => setAttestors(
-                              on ? attestors.filter((a) => a !== m.id)
-                                 : full ? attestors : [...attestors, m.id]))} />
-                  );
-                })}
-                {!attestors.length && (
-                  <span className="ml-1 text-[11px] text-warn">
-                    none selected — pick {MIN_PANEL}–{MAX_PANEL}
-                  </span>
-                )}
-              </Row>
-            </>
-          )}
-        </div>
+              </div>
+            </Field>
+          </>
+        ) : (
+          <Field label={`Controls ${attestors.length}/${MAX_PANEL}`} wide
+                 info={<>
+                   The models that judge the dialect, blind. Unlike a reader
+                   chain, <b>every one of these answers</b> — they are a panel,
+                   not a fallback — and each costs three control calls plus two
+                   attestations. A panel of one is still reported at low
+                   confidence, because one judge is one opinion.
+                   {offeringHelp && <><br /><br />{offeringHelp}</>}
+                 </>}>
+            <div className="flex min-h-[30px] flex-wrap items-center gap-1">
+              {eligible.map((m) => {
+                const on = attestors.includes(m.id);
+                const full = !on && attestors.length >= MAX_PANEL;
+                return (
+                  <Toggle key={m.id} on={on} label={m.id} dim={full}
+                          onClick={() => choose(() => setAttestors(
+                            on ? attestors.filter((a) => a !== m.id)
+                               : full ? attestors : [...attestors, m.id]))} />
+                );
+              })}
+              {!attestors.length && (
+                <span className="ml-1 text-[11px] text-warn">
+                  none selected — pick {MIN_PANEL}–{MAX_PANEL}
+                </span>
+              )}
+            </div>
+          </Field>
+        )}
       </div>
 
-      {/* 5: how to watch it, and go. Nothing here changes what is measured. */}
+      {/* How to watch it, and go. Nothing here changes what is measured. */}
       <div className="flex flex-wrap items-end gap-x-6 gap-y-2 border-t
                       border-line-soft px-4 py-2.5">
         <Field label="Mode"
@@ -427,30 +484,17 @@ function GroupLabel({ label, info, wide }: {
   );
 }
 
-function Field({ label, info, children }: {
+function Field({ label, info, children, wide }: {
   label: string; info?: React.ReactNode; children: React.ReactNode;
+  /** Widens the info bubble, for the fields whose note is reference text
+   *  rather than a sentence. */
+  wide?: boolean;
 }) {
   return (
     <div className="min-w-0">
-      <div className="mb-1"><GroupLabel label={label} info={info} /></div>
+      <div className="mb-1"><GroupLabel label={label} info={info} wide={wide} /></div>
       {children}
     </div>
-  );
-}
-
-/** One labelled row of the detail grid. The label sits in its own column so
- *  every row lines up however long any of them gets. */
-function Row({ label, info, children }: {
-  label: string; info?: React.ReactNode; children: React.ReactNode;
-}) {
-  return (
-    <>
-      <span className="flex items-center justify-end gap-1 whitespace-nowrap
-                       text-ink-faint">
-        {label}{info && <Info>{info}</Info>}
-      </span>
-      <span className="flex min-w-0 flex-wrap items-center gap-1">{children}</span>
-    </>
   );
 }
 
