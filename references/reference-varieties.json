@@ -13,66 +13,66 @@
   "eng|Latn": {
     "region": "US",
     "why": "The rule cannot fire — there is no `en-EN`. US over GB: it is what CLDR likelySubtags resolves bare `en` to, and `markers/english.json` already expresses every sibling against the American forms, so a different choice here would contradict the marker sets.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "ara|Arab": {
     "region": "SA",
     "why": "Operator decision. The alternative baseline is Modern Standard Arabic, which is not a region and so cannot be a member of this class; SA is the closest regional standard to it.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "zho|Hans": {
     "region": "CN",
     "why": "Simplified Chinese. The class also holds a regionless `zh-hans`, which is a script label rather than a variety anything can be contrasted against.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "zho|Hant": {
     "region": "TW",
     "why": "Traditional Chinese. TW over HK: Hong Kong written Chinese carries Cantonese lexis, a second dimension of difference that would make every contrast against it measure two things at once.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "srp|Cyrl": {
     "region": "RS",
     "why": "The rule cannot fire: Serbian is `sr` and Serbia is `RS`. Serbia baselines both Serbian classes; Montenegro, Bosnia and Kosovo are the varieties contrasted against it.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "srp|Latn": {
     "region": "RS",
     "why": "As `srp|Cyrl`, in the other alphabet. A reference never crosses a script class.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "swe|Latn": {
     "region": "SE",
     "why": "The rule cannot fire: Swedish is `sv` and Sweden is `SE`. Finland and Åland Swedish are the varieties under contrast.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "dan|Latn": {
     "region": "DK",
     "why": "The rule cannot fire: Danish is `da` and Denmark is `DK`.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "ell|Grek": {
     "region": "GR",
     "why": "The rule cannot fire: Greek is `el` and Greece is `GR`. Cypriot Greek is the variety under contrast.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "fas|Arab": {
     "region": "IR",
     "why": "The rule cannot fire: Persian is `fa` and Iran is `IR`. Dari is the variety under contrast.",
-    "reviewed": false
+    "reviewed": true
   },
 
   "aze|Latn": {
     "tag": "az-az-latn",
     "why": "A tag rather than a region, and an exception to the rule. `az` equals `AZ`, but this class holds both `az-AZ-Latn` and `az-AZ-Cyrl` — a Cyrillic tag filed under a Latin class, which is a defect in the loaded locale list. Region `AZ` would therefore match two members, and the rule would pick the Cyrillic one, making every contrast in the family measure the alphabet.",
-    "reviewed": false
+    "reviewed": true
   }
 }
