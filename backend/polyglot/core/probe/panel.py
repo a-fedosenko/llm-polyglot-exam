@@ -82,7 +82,13 @@ class ControlResult:
     raw: str | None = None
 
     def as_dict(self) -> dict:
-        return {"kind": self.kind.value, "passed": self.passed, "detail": self.detail}
+        # `raw` travels with the verdict rather than staying in the corpus. A
+        # control that failed is a model being discarded for this family, and
+        # the operator cannot sanity-check that from a one-line summary — the
+        # answer it actually gave is the evidence, and it belongs on the page
+        # beside the ruling.
+        return {"kind": self.kind.value, "passed": self.passed,
+                "detail": self.detail, "raw": self.raw}
 
 
 @dataclass
@@ -170,9 +176,11 @@ def order_control(client: OpenAICompatClient, attestor: str, *, first: str, seco
                             s.raw, s.error,
                             meta={"a": s.a, "b": s.b, "swapped": s.swapped}))
 
+    both = "\n\n--- shown the other way round ---\n\n".join(
+        x.raw or "" for x in (a, b))
     if a.error or b.error:
         return ControlResult(ControlKind.ORDER, False,
-                             f"no usable answer: {a.error or b.error}")
+                             f"no usable answer: {a.error or b.error}", both)
     # Unscramble both into the caller's own order, then compare. If the answer
     # follows the text, the two readings agree; if it follows the slot, they do
     # not. Both merging and both declining also agree, and are not evidence of
@@ -182,11 +190,11 @@ def order_control(client: OpenAICompatClient, attestor: str, *, first: str, seco
 
     if settled(a) == settled(b):
         return ControlResult(ControlKind.ORDER, True,
-                             "the answer followed the text, not the slot")
+                             "the answer followed the text, not the slot", both)
     return ControlResult(
         ControlKind.ORDER, False,
         f"answered {a.a!r}/{a.b!r} then {b.a!r}/{b.b!r}: the answer followed the "
-        "position rather than the text")
+        "position rather than the text", both)
 
 
 def qualify_attestor(client: OpenAICompatClient, attestor: str, *, family: str,

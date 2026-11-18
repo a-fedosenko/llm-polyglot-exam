@@ -166,9 +166,15 @@ class Identification:
         return self.ok and not self.declined and not self.generic
 
     def as_dict(self) -> dict:
+        # `raw` is carried, not dropped. The parsed `answer` is this module's
+        # reading of a reply, and an operator correcting a judgement needs the
+        # reply itself: a model that hedged in prose, answered a region not on
+        # the menu, or was mis-parsed all look identical once reduced to a
+        # label. The corpus has it on disk, which is no help while looking at
+        # the step that produced it.
         return {"answer": self.answer, "confidence": self.confidence,
                 "markers": self.markers, "fabricated": self.fabricated,
-                "error": self.error}
+                "raw": self.raw, "error": self.error}
 
 
 def _parse(raw: str) -> tuple[dict | None, str | None]:
@@ -355,7 +361,8 @@ class Separation:
     def as_dict(self) -> dict:
         return {"a": self.a, "b": self.b, "swapped": self.swapped,
                 "confidence": self.confidence, "markers": self.markers,
-                "fabricated": self.fabricated, "error": self.error}
+                "fabricated": self.fabricated, "raw": self.raw,
+                "error": self.error}
 
 
 def separate_prompt(a: str, b: str, blind: Blind) -> tuple[str, str]:

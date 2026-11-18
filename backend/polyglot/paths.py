@@ -30,6 +30,11 @@ MARKERS = ROOT / "markers"
 #: working on a decision before proposing it.
 REFERENCES = ROOT / "references"
 SPECS = DATA / "specs" / "specs.json"
+#: The dialect battery's own scenarios. Separate from the capability specs
+#: because the two instruments want different text — one graded for fact
+#: recall, one chosen to force the vocabulary where varieties come apart — and
+#: improving either must not silently change the other's measurements.
+DIALECT_SPECS = DATA / "specs" / "dialect.json"
 CONTROLS = DATA / "controls"
 
 # -- produced, regenerable -----------------------------------------------------

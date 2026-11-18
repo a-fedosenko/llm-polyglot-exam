@@ -184,3 +184,56 @@ def test_coverage_counts_only_families_that_can_be_contrasted(scheme):
     cov = ref.coverage(scheme)
     assert cov["families"] == cov["decided"] + len(cov["provisional"])
     assert "srp|Latn" not in cov["provisional"]
+
+
+# -- the evidence an operator overrules ----------------------------------------
+
+def test_every_attestor_answer_carries_the_reply_it_was_read_from():
+    """The parsed label is this application's *reading* of a reply.
+
+    An operator correcting a judgement cannot do it from the judgement: a model
+    that hedged in prose, that named a region which was not on the menu, and one
+    that was simply mis-parsed all reduce to the same label. The reply was in
+    the corpus on disk the whole time, which is no help while looking at the
+    step that produced it.
+    """
+    from polyglot.core.probe.attest import Identification, Separation
+    from polyglot.core.probe.panel import ControlKind, ControlResult
+
+    ident = Identification(answer="Serbia", raw='{"answer": "Serbia"}')
+    assert ident.as_dict()["raw"] == '{"answer": "Serbia"}'
+
+    sep = Separation(a="Serbia", b="Montenegro", raw="…both answers…")
+    assert sep.as_dict()["raw"] == "…both answers…"
+
+    ctl = ControlResult(ControlKind.ORDER, False, "followed the position", "…")
+    assert ctl.as_dict()["raw"] == "…", \
+        "a failed control discards a model for the whole family — the answer " \
+        "it gave is the evidence for that"
+
+
+# -- the language check cannot referee a dialect --------------------------------
+
+def test_an_abstaining_language_check_keeps_the_text(scheme):
+    """`sr-ME-Latn` abstains on bos, cnr, hbs and hrv — its own siblings.
+
+    That abstention is the expected answer for a pluricentric family and says
+    nothing about the text; it is the reason the battery asks attestors instead
+    of a classifier. Voiding the generation on it killed the whole family
+    whenever LID happened to name a sibling.
+    """
+    from polyglot.core.probe.gate import GateResult, GateVerdict
+    from polyglot.core.probe.ladder_support import indistinguishable_codes
+
+    assert "bos" in indistinguishable_codes(scheme.get("sr-me-latn"))
+
+    abstention = GateResult(GateVerdict.LOW_CONFIDENCE)
+    assert abstention.abstained is True
+    assert abstention.passed is False
+    assert abstention.is_negative is False, \
+        "an abstention is not evidence against the model"
+
+    for verdict in (GateVerdict.REFUSED, GateVerdict.WRONG_SCRIPT,
+                    GateVerdict.DEGENERATE):
+        assert GateResult(verdict).abstained is False, \
+            f"{verdict} is a real negative and must still void the generation"

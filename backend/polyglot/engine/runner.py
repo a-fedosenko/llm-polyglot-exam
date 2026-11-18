@@ -253,11 +253,14 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
         subject = scheme.get(tag)
         if subject is None:
             raise RunError(f"Unknown tag {tag!r}.")
-        # No longer required. The conversion probe used to rewrite the
-        # umbrella's text into the variety, which made the model's own default
-        # variety the silent baseline; it now converts between the two arms, so
-        # a family with no umbrella tag is testable like any other.
-        neutral = neutral_tag or _umbrella_for(scheme, subject)
+        # Not derived any more, and not required. The conversion probe used to
+        # rewrite the umbrella's text into the variety, which made the model's
+        # own default variety the silent baseline; it now converts between the
+        # two arms, so a family with no umbrella tag is testable like any
+        # other. A caller that passes one explicitly still has it reported back
+        # as unused rather than silently ignored — but nothing goes looking for
+        # one, so the usual run has no third text in it at all.
+        neutral = neutral_tag
         # Named explicitly, never defaulted to "everything eligible". The
         # default used to be the whole field, and an unattended gesture that
         # spends five calls per model is the wrong kind of convenient.
@@ -270,11 +273,19 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
                 f"as a methodological one — and a panel of one is still reported "
                 f"at low confidence, because one judge is one opinion.")
         chosen_specs, edited_specs = specs_for(specs)
+        # The battery's own scenarios, not the capability ones. It used to take
+        # `specs[0]` — `bus-rain-office`, whose Serbian rendering carries one
+        # optional yat reflex and no other difference between ijekavian and
+        # ekavian at all. Four rewrites of the conversion prompt produced
+        # identical results on it, which is what a text with nothing to find in
+        # it looks like from the outside.
+        from polyglot.core.probe.specs import load_dialect_specs
+        dialect_specs = load_dialect_specs()
         machine = DialectMachine(
             scheme=scheme, tag=tag, engine=engine, client=client,
             attestors=chosen,
             varieties=langs, neutral_tag=neutral,
-            scenario=scenario or chosen_specs[0].scenario, corpus=corpus,
+            scenario=scenario or dialect_specs[0].scenario, corpus=corpus,
             record=DbAttestorRecord())
     else:
         raise RunError(f"Unknown test type {test_type!r}.")
@@ -298,21 +309,6 @@ def start(*, test_type: str, tag: str, engine: str, mode: str = "manual",
         _SESSIONS[run_id] = sess
     return sess
 
-
-def _umbrella_for(scheme, lang):
-    """The locale list's unqualified tag for this language, if it has one.
-
-    `inclusive`, not ISO scope: a TMS marks `pt` inclusive because it is the
-    unqualified spelling standing over `pt-br`, which is a statement about that
-    list's shape rather than about the language.
-    """
-    for cand in scheme.languages.values():
-        if cand.lang == lang.lang and cand.inclusive:
-            return cand.tag
-    return None
-
-
-# -- driving it ----------------------------------------------------------------
 
 def plan(sess: Session) -> dict | None:
     """What happens next, and what it will cost. Free.

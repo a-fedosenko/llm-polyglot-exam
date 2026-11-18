@@ -1,0 +1,68 @@
+{
+  "_about": {
+    "why-separate": "The capability specs exist to be graded for fact recall: five checkable facts, short enough that a back-translation can be judged cleanly. A dialect battery asks a different question and needs a different text — one that forces the model to *reach for* the vocabulary where varieties come apart. Kept apart so that improving one instrument cannot silently change the other's measurements.",
+    "what-makes-a-good-one": "Not length, and emphatically not register. The regional differences that distinguish standards live in the highest-frequency, most concrete layer of a language: kinship, weather, food, the body, time, place, direction, motion. Serbian ijekavian/ekavian is a reflex in words like dijete, mlijeko, snijeg, vrijeme, mjesto, čovjek, djevojka, nedjelja, gdje, poslije. Political and scientific prose is the opposite layer — standardised, Latinate, shared across every variety — so a long paragraph about institutions yields fewer markers than three sentences about a child and some milk.",
+    "how-these-are-built": "Each scenario is a semantic specification in the pivot language. It names CONCEPTS the writer cannot avoid — a child, snow, a week, a river, a place, somewhere — and never a form. That distinction is what keeps this elicitation rather than prompting: the model still has to know how its variety says these things. A prompt that listed the forms would measure instruction-following instead, and `distinguishes` would come to mean 'can apply a word list'.",
+    "pivot-only": "These are written in the pivot language and describe what must be said, not how. The model chooses its own words, which is the whole point — a sentence handed over for translation rewards copying.",
+    "coverage": "Deliberately generic: these aim at the concept layer that is regionally variable in most languages, not at one family. A per-family scenario aimed at a known alternation would be stronger still, and is the obvious next step for the families that matter.",
+    "reviewed": "None of these has been checked by a speaker of any particular family for whether it actually forces that family's alternations. They are a better bet than the capability specs, not a measured improvement."
+  },
+
+  "specs": [
+    {
+      "id": "child-milk-snow",
+      "scenario": "A child is sent next door for milk before supper. It has been snowing since the morning and the road is bad, so the walk takes longer than usual. The neighbour, an old man, gives the child bread as well and says the weather will be worse next week. The child's grandfather is waiting by the door when they get back.",
+      "facts": [
+        "A child was sent to fetch milk.",
+        "It had been snowing since morning.",
+        "A neighbour also gave the child bread.",
+        "The neighbour said the weather would worsen the following week.",
+        "The grandfather was waiting at the door."
+      ]
+    },
+    {
+      "id": "river-girl-bridge",
+      "scenario": "A girl walks down to the river to see how high the water is after the rain. The old bridge is closed, so she goes the long way round through the village. On the other side she meets two children who tell her the road to town is flooded. She decides it is too late to go anywhere and turns back.",
+      "facts": [
+        "A girl went to the river to look at the water.",
+        "The old bridge was closed.",
+        "She went through the village instead.",
+        "Children told her the road to town was flooded.",
+        "She turned back because it was late."
+      ]
+    },
+    {
+      "id": "doctor-week-village",
+      "scenario": "A man has been ill for a week and his wife wants him to see a doctor. There is no doctor in the village, so they must travel on Sunday to the nearest town. He says he feels better and would rather wait until after the holiday. She says that is what he said last time, and that she does not believe him.",
+      "facts": [
+        "A man had been ill for a week.",
+        "There was no doctor in the village.",
+        "They would have to travel on Sunday.",
+        "He wanted to wait until after the holiday.",
+        "His wife did not believe he felt better."
+      ]
+    },
+    {
+      "id": "bread-market-price",
+      "scenario": "An old woman goes to the market early because bread is cheaper before noon. Everything costs more than it did last year, and she cannot find the flour she wanted. She buys apples instead and carries them home in a bag that is too heavy. On the way she stops twice to rest.",
+      "facts": [
+        "An old woman went to the market early.",
+        "Bread was cheaper before noon.",
+        "Prices were higher than the previous year.",
+        "She bought apples because there was no flour.",
+        "She stopped twice to rest on the way home."
+      ]
+    },
+    {
+      "id": "house-summer-work",
+      "scenario": "Two brothers are repairing the roof of their father's house during the hottest week of the summer. One of them wants to finish before the rain comes; the other says there is no point hurrying because the wood is still wet. They work until evening and agree to carry on tomorrow morning. Neither of them says what they are both thinking, which is that nobody will live in the house.",
+      "facts": [
+        "Two brothers were repairing a roof.",
+        "The house belonged to their father.",
+        "It was the hottest week of summer.",
+        "One wanted to finish before the rain.",
+        "They agreed to continue the next morning."
+      ]
+    }
+  ]
+}

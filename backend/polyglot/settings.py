@@ -14,12 +14,45 @@ from polyglot.paths import ROOT
 #: one -- a changed prompt, a moved threshold, a different gate rule. It is part
 #: of a verdict's identity, so a bump does not destroy anything: it makes every
 #: stored verdict *stale* rather than wrong, and the UI says so.
+#: 6.2.0 — an abstaining language check no longer voids a dialect generation.
+#: A pluricentric family's siblings are precisely the codes LID cannot
+#: separate — `sr-ME-Latn` abstains on bos, cnr, hbs and hrv — so whenever the
+#: classifier named one, the text was discarded, no pair could be built, and
+#: the battery reported `indeterminate` for a perfectly usable generation. The
+#: gate still catches refusal, copying, wrong script, degeneration and
+#: substitution of a relative; deciding *which* sibling this is was never its
+#: job.
+#:
+#: 6.1.0 — the conversion prompt is back to the 5.2.0 wording. Three rewrites
+#: were tried between (5.3.0 a conversion engine, 5.4.0 a dialectal
+#: localisation engine, 5.5.0 an expert linguist, 6.0.0 a two-step version
+#: reasoning in `<analysis>` tags) and every one produced results identical to
+#: this wording on the same text. That is what located the problem elsewhere:
+#: the battery was running on `bus-rain-office`, whose Serbian rendering
+#: carries one optional yat reflex and no other ijekavian/ekavian difference at
+#: all. It now runs on `data/specs/dialect.json`, scenarios chosen to force the
+#: vocabulary where varieties come apart. Not a return to 5.2.0 — the text
+#: changed, so the measurement is new.
+#:
+#: 5.2.0 — the conversion prompt stops ending on five prohibitions and a
+#: standing permission to return the text unchanged. Everything nearest the end
+#: of 5.1.0's wording pushed toward doing nothing, which would have deflated the
+#: square's off-diagonal into `no-distinction` — the mirror of the false
+#: negative 5.1.0 was written to remove. The constraints now sit mid-prompt and
+#: the closing instruction is symmetric: neither invent a difference nor leave
+#: a real one.
+#:
+#: 5.1.0 — the conversion prompt names what the variety differs *from* and
+#: repeats the designator instead of referring to it. The dangling comparand was
+#: left behind by 5.0.0: it used to be implicit in the umbrella text the probe
+#: no longer uses.
+#:
 #: 5.0.0 — P3 became a 2×2 between the two arms, replacing conversion from the
 #: umbrella (which was the model's own default variety, not a neutral source)
 #: and absorbing P4; a battery whose two arms come back identical stops free;
 #: a silent panel reports `indeterminate` rather than `no-evidence`; and
 #: confidence counts votes rather than panel members.
-METHOD_VERSION = "5.0.0"
+METHOD_VERSION = "6.2.0"
 
 
 class Settings(BaseSettings):

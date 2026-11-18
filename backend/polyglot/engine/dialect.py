@@ -616,9 +616,14 @@ class DialectMachine:
                 else "neutral source" if variety.inclusive else "contrast arm")
         return self._make(
             planned, summary=f"{variety.tag} ({role}): {item.note}",
-            tone="ok" if item.ok else "bad",
+            # Three states, because an abstention is neither. Colouring it like
+            # a failure would say the opposite of what the battery does with
+            # it: the text is kept and measured.
+            tone="ok" if item.ok and not item.abstained
+                 else "warn" if item.ok else "bad",
             result={"tag": variety.tag, "text": item.text,
-                    "gate": item.gate_verdict, "error": item.error},
+                    "gate": item.gate_verdict, "abstained": item.abstained,
+                    "error": item.error},
             calls={"produce": 1}, obj=item)
 
     def _do_convert(self, planned: Planned, sent: list[Call]) -> Executed:

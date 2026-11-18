@@ -37,7 +37,14 @@ class ScriptedClient:
     @staticmethod
     def _role(system: str | None, prompt: str) -> str:
         s = system or ""
-        if "rewrite the text the user gives you" in s:
+        # The one place this fixture matches on prompt text, and it is
+        # load-bearing: a prompt whose wording moves out from under it is
+        # answered as the wrong role *silently*, which is worse than not
+        # matching at all — the first time it happened a control-model test
+        # changed its verdict instead of failing. `test_every_real_prompt_is_
+        # classified` in test_engine.py builds each real prompt and asserts
+        # this function still recognises it, so the next move fails loudly.
+        if "text already written in this language" in s:
             return "convert"
         if "You are a native speaker of" in s:
             return "generation"

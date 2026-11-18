@@ -92,6 +92,30 @@ class GateResult:
         return self.verdict is GateVerdict.PASS
 
     @property
+    def abstained(self) -> bool:
+        """The instrument declined to rule, which is not a failure of the text.
+
+        `LOW_CONFIDENCE` is deliberately absent from `NEGATIVE`: it says the
+        language check could not settle the question, not that the model got it
+        wrong. Whether that voids the generation is the caller's decision, and
+        the two callers answer differently —
+
+        A **capability** run must void it. The whole claim is "this text is in
+        the target language", and an item nobody can confirm is in it cannot
+        support that claim.
+
+        A **dialect** battery must not. Its siblings are in `abstain_lang`
+        *because* language identification cannot tell them apart — `sr-ME-Latn`
+        abstains on `bos`, `cnr`, `hbs` and `hrv` — which is the entire reason
+        the battery asks attestors instead of a classifier. Treating the
+        classifier's structural inability as a failed generation meant a whole
+        pluricentric family died at the gate whenever LID happened to name a
+        sibling, and the run reported `indeterminate` for a text that was
+        perfectly usable.
+        """
+        return self.verdict is GateVerdict.LOW_CONFIDENCE
+
+    @property
     def is_negative(self) -> bool:
         return self.verdict in NEGATIVE
 

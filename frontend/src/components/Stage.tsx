@@ -638,18 +638,32 @@ function PlanStep({ r }: any) {
               {v.is_subject && <span className="ml-auto chip">under test</span>}
             </div>
           ))}
-          {r.neutral && (
-            <div className="flex items-center gap-3 rounded-md border border-dashed
-                            border-line px-2.5 py-2">
-              <span className="font-mono text-[12px] text-ink-soft">{r.neutral.tag}</span>
-              <span className="text-[13px] text-ink-soft">{r.neutral.designator}</span>
-              <span className="ml-auto chip" title="Neutral text to be rewritten into the variety. Never a contrast arm: pairing the umbrella against a variety leaves one answerable option, which is not a question.">
-                conversion source
-              </span>
-            </div>
-          )}
         </div>
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+          Two arms and nothing else. The conversion probe rewrites each one into
+          both varieties, so there is no third text and no privileged baseline.
+        </p>
       </Section>
+
+      {r.neutral?.used === false && (
+        <Section title="The umbrella tag"
+                 info="Kept in the plan so a caller that sent one is told it was ignored, rather than believing it was used.">
+          <div className="flex items-center gap-3 rounded-md border border-dashed
+                          border-line px-2.5 py-2 opacity-60">
+            <span className="font-mono text-[12px] text-ink-soft">{r.neutral.tag}</span>
+            <span className="text-[13px] text-ink-soft">{r.neutral.designator}</span>
+            <span className="ml-auto chip">not used</span>
+          </div>
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+            It used to be the conversion source — neutral text to be rewritten
+            into each variety — and it was never neutral: the model under test
+            wrote it, so it was that model's own default variety. Whichever
+            variety a model defaults to could therefore never show a conversion,
+            and the baseline was resampled on every run. The square converts
+            between the two arms instead.
+          </p>
+        </Section>
+      )}
 
       <Section title="Control models eligible to judge"
                info="The producer's whole family is dropped, not just its id: a model grading its own output measures self-consistency and reports it as agreement. Who is asked first may be ordered by past records; whether an answer is believed is decided by the controls, every single run.">
@@ -678,8 +692,24 @@ function PlanStep({ r }: any) {
 function ProduceStep({ r }: any) {
   return (
     <Section title={`What the model wrote for ${r.tag}`}
-             right={<Badge tone={r.text ? "ok" : "bad"}>gate: {r.gate ?? "—"}</Badge>}>
+             right={
+               <Badge tone={!r.text ? "bad" : r.abstained ? "warn" : "ok"}>
+                 gate: {r.gate ?? "—"}
+               </Badge>
+             }>
       <Text>{r.text ?? r.error ?? "—"}</Text>
+      {r.abstained && (
+        <p className="mt-2 rounded-md border border-warn/30 bg-warn-soft p-2.5
+                      text-[11.5px] leading-relaxed text-warn">
+          <b>The language check abstained, and the text is kept.</b> This
+          family's siblings are exactly the codes language identification cannot
+          separate — Serbian abstains on Bosnian, Croatian and Montenegrin —
+          which is the reason this battery asks control models rather than a
+          classifier. The gate still catches refusals, wrong script, copying and
+          degeneration; deciding <i>which</i> sibling a text is was never its
+          job.
+        </p>
+      )}
     </Section>
   );
 }
@@ -749,7 +779,30 @@ function ConvertStep({ r }: any) {
           <Section title="after"><Text>{r.after ?? "—"}</Text></Section>
         </div>
       )}
+
     </>
+  );
+}
+
+/** What the model actually replied, verbatim.
+ *
+ * The counterpart to "Exactly what was sent", and it exists for the same
+ * reason. Everything else on an attestor step is this application's *reading*
+ * of a reply — a parsed label, a confidence, a marker list — and a reader who
+ * wants to overrule that judgement cannot do it from the judgement. A model
+ * that hedged in prose, that named a region which was not on the menu, and one
+ * that was simply mis-parsed all look identical once reduced to "generic".
+ *
+ * It was in the corpus on disk the whole time, which is no help at all while
+ * looking at the step that produced it. */
+function Replied({ raw, label = "What it actually replied" }: {
+  raw?: string | null; label?: string;
+}) {
+  if (!raw) return null;
+  return (
+    <Collapse label={label}>
+      <Text className="text-ink-soft">{raw}</Text>
+    </Collapse>
   );
 }
 
@@ -772,6 +825,14 @@ function ControlsStep({ r }: any) {
               <span className="text-[13px] font-medium text-ink">{c.kind}</span>
             </div>
             <p className="mt-0.5 text-[12.5px] text-ink-soft">{c.detail}</p>
+            {/* On a failed control especially: this is a model being discarded
+                for the whole family, and "it answered by position" is a
+                conclusion the operator should be able to check against the
+                answer itself. */}
+            <div className="mt-1.5">
+              <Replied raw={c.raw}
+                       label={`what ${r.attestor} answered — ${c.kind} control`} />
+            </div>
           </li>
         ))}
       </ul>
@@ -833,6 +894,7 @@ function IdentifyStep({ r, onOverride }: any) {
         </div>
       </Section>
       <Markers markers={r.markers} fabricated={r.fabricated} />
+      <Replied raw={r.raw} />
     </>
   );
 }
@@ -869,6 +931,7 @@ function SeparateStep({ r, onOverride }: any) {
         </div>
       </Section>
       <Markers markers={r.markers} fabricated={r.fabricated} />
+      <Replied raw={r.raw} />
     </>
   );
 }

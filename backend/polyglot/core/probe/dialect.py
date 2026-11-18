@@ -158,6 +158,11 @@ class Produced:
     text: str | None = None
     gate_verdict: str | None = None
     error: str | None = None
+    #: The language check declined to rule rather than passing. The text is
+    #: kept — see `GateResult.abstained` — and the caveat travels with it so a
+    #: reader is never shown a gated generation and an ungated one as the same
+    #: thing.
+    abstained: bool = False
 
     @property
     def ok(self) -> bool:
@@ -165,6 +170,8 @@ class Produced:
 
     @property
     def note(self) -> str:
+        if self.abstained:
+            return f"kept, language check abstained ({self.gate_verdict})"
         return self.gate_verdict or self.error or "no output"
 
 
@@ -188,6 +195,12 @@ def _produce(*, client: OpenAICompatClient, engine: str, lang: Language,
                              abstain=abstain, messages=messages)
     if item.error:
         return Produced(None, item.gate.verdict.value, item.error)
+    if item.gate.abstained:
+        # Kept. The siblings of a pluricentric family are exactly the codes the
+        # language check cannot separate, so its abstention is the expected
+        # answer here and not evidence about the text. The attestors settle
+        # which variety this is; that is what they are for.
+        return Produced(item.generation, item.gate.verdict.value, abstained=True)
     if not item.gate.passed:
         return Produced(None, item.gate.verdict.value,
                         item.gate.detail or item.gate.verdict.value)
@@ -196,16 +209,61 @@ def _produce(*, client: OpenAICompatClient, engine: str, lang: Language,
 
 # -- P3 and P4: the free half -------------------------------------------------
 
+#: The conversion prompt, identical for all four cells of the square.
+#:
+#: **It has to be identical.** The diagonal and the off-diagonal are only
+#: comparable because they were asked the same question; a prompt that told the
+#: model which cell it was in would make the diagonal a no-op it could satisfy
+#: by reading the instruction rather than by knowing the variety, which is how
+#: the order control degenerates on an identical pair.
+#:
+#: Four things it is careful about:
+#:
+#: - **The comparand is named.** "Wherever that variety differs" had nothing to
+#:   differ *from*. It used to be implicit — the user message was neutral
+#:   umbrella text, so "differs" meant "differs from generic" — and the square
+#:   removed that referent without the prompt noticing. "From its sibling
+#:   varieties" supplies the baseline without naming the source text, which is
+#:   what leaves the diagonal a real test.
+#: - **The designator is repeated, never referred to.** "This specific variety"
+#:   was an anaphor pointing at `Serbian (Serbia, Latin script)` — a name plus
+#:   a bracketed annotation, which reads as formatting, the more so because the
+#:   script is named again in the script rule.
+#: - **It ends on the task, and the closing instruction is symmetric.** The two
+#:   failure modes are opposite and the prompt must lean toward neither:
+#:   inventing a difference inflates the off-diagonal, leaving a real one
+#:   deflates it. An earlier wording ended on five prohibitions and a standing
+#:   permission to return the text unchanged, so everything nearest the end
+#:   pushed toward inaction.
+#: - **The variety's actual forms are deliberately absent.** A prompt listing
+#:   them — *sjutra*, *đed*, *nijesam* — works better, and that is the problem:
+#:   P3 asks whether the model knows what the variety requires, and handing it
+#:   the answer measures instruction-following instead.
+#:
+#: **Three rewrites were tried and reverted** (a strict conversion engine, a
+#: dialectal localisation engine with five numbered rules, and a two-step
+#: version that reasoned inside `<analysis>` tags before emitting `<result>`).
+#: All three produced results identical to this one on the same text — which is
+#: what finally located the problem somewhere other than the prompt. See
+#: `data/specs/dialect.json`: the battery was running on a scenario whose
+#: Serbian rendering carries a single optional yat reflex, so there was nothing
+#: in it for any wording to find.
 CONVERT_SYSTEM = """You are a native speaker of {designator}.
 
-Your task: rewrite the text the user gives you so that it reads as a native \
-speaker of this specific variety would write it, changing the grammar, spelling \
-and vocabulary wherever that variety differs.
+The user gives you a text already written in this language, in some variety \
+of it. Rewrite it so that it reads as {designator} and not as any other \
+regional variety of the same language.
 {script_rule}
-Change only what this variety requires. Do not translate, do not paraphrase, do \
-not add or remove information, and do not explain or comment. If nothing needs \
-to change, return the text unchanged.
-Output only the rewritten text and nothing else."""
+Leave everything that is not a difference between varieties exactly as it is: \
+do not translate, do not paraphrase, do not improve the style, do not add or \
+remove information, and do not explain or comment.
+
+Go through the text and apply every form that {designator} uses where a \
+sibling variety would use another — spelling, vocabulary, grammar. Keep every \
+form the varieties share. Neither invent a difference to show work, nor leave \
+a real one in place.
+
+Output only the resulting text and nothing else."""
 
 
 @dataclass
@@ -296,11 +354,18 @@ def diff(before: str, after: str) -> tuple[list[tuple[str, str]], float]:
 
 
 def convert_prompt(lang: Language, designator: str) -> str:
-    """The conversion system message, as a pure function."""
+    """The conversion system message, as a pure function.
+
+    The script rule is a sentence inside the prompt rather than a floating
+    paragraph, so a language whose entry names no script still gets one instead
+    of a gap that reads as a truncated prompt.
+    """
+    name = dsg.script_name_for(lang.script)
     return CONVERT_SYSTEM.format(
         designator=designator,
-        script_rule=(dsg.SCRIPT_RULE.format(script_name=s)
-                     if (s := dsg.script_name_for(lang.script)) else ""))
+        script_rule=("\n" + dsg.SCRIPT_RULE.format(script_name=name).strip() + "\n"
+                     if name else
+                     "\nKeep the writing system of the input unchanged.\n"))
 
 
 def convert(*, client: OpenAICompatClient, engine: str, lang: Language, text: str,
@@ -342,7 +407,10 @@ def convert(*, client: OpenAICompatClient, engine: str, lang: Language, text: st
     out.gate = gate_check(gen.text, prompt=system, expect_lang=lang.iso639_3,
                           expect_script=lang.script, relatives=relatives,
                           accept_lang=accept, abstain_lang=abstain)
-    if not out.gate.passed:
+    # Same rule as the generation half: an abstention is the language check
+    # being unable to separate siblings, which is the normal case here and says
+    # nothing about the conversion.
+    if not out.gate.passed and not out.gate.abstained:
         out.error = out.gate.detail or out.gate.verdict.value
         return out
 

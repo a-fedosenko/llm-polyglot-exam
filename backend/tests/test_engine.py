@@ -404,3 +404,40 @@ def test_an_engine_that_never_answers_stops_the_run_without_a_verdict(scripted, 
     assert "returned nothing" in out["notes"][0]
     assert not any(c["model"] == "other-reader-b" for c in client.calls), \
         "nothing may be paid for an instrument when nothing was measured"
+
+
+def test_every_real_prompt_is_classified_by_the_scripted_client():
+    """The fixture routes answers by reading the system message, so a prompt
+    whose wording moves is answered as the wrong role — silently. That has
+    happened twice: a conversion came back as a generation and a control-model
+    test changed its verdict rather than failing to match.
+
+    Building the real prompts here is what turns the next move into a failure
+    instead of a wrong number.
+    """
+    from conftest import ScriptedClient
+    from polyglot.core.probe import attest, designator as dsg
+    from polyglot.core.probe.attest import Blind
+    from polyglot.core.probe.dialect import convert_prompt
+    from polyglot.core.probe.ladder_support import candidates_for
+    from polyglot.core.scheme import load_scheme
+
+    scheme = load_scheme("catmint")
+    lang = scheme.get("sr-me-latn")
+    designator = candidates_for(scheme, lang)[0].value
+    blind = Blind(language="Serbian", options=["Serbia", "Montenegro"],
+                  script_name="Latin")
+
+    gen_sys, _ = dsg.generation_prompt(designator, "a scenario", 3,
+                                       script_name="Latin")
+    cases = {
+        "convert": (convert_prompt(lang, designator), "text"),
+        "generation": (gen_sys, "text"),
+        "identify": attest.identify_prompt("text", blind),
+        "separate": attest.separate_prompt("a", "b", blind),
+    }
+    for role, pair in cases.items():
+        system, user = pair if isinstance(pair, tuple) else (pair, "text")
+        assert ScriptedClient._role(system, user) == role, \
+            f"a real {role} prompt is now classified as " \
+            f"{ScriptedClient._role(system, user)!r}"

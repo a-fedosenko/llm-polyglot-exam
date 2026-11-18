@@ -33,7 +33,7 @@ from polyglot.core import discovery
 from polyglot.core import reference as reference_mod
 from polyglot.core.client import NOT_CONFIGURED_MESSAGE, is_configured
 from polyglot.core.probe import lid
-from polyglot.core.probe.specs import load_specs
+from polyglot.core.probe.specs import load_dialect_specs, load_specs
 from polyglot.core.scheme import load_scheme
 from polyglot.engine import batch, runner
 from polyglot.engine.batch import BatchError
@@ -208,6 +208,10 @@ def language(tag: str, engine: str | None = None, scheme: str | None = None) -> 
         "reference": reference_mod.reference_of(sch, lang).as_dict(),
         "known": known,
         "specs": [s.model_dump() for s in load_specs()],
+        #: The dialect battery's own scenarios. What a contrast can find is
+        #: bounded by what the text gives the two varieties to disagree about,
+        #: so which one is asked is a real choice rather than a detail.
+        "dialect_specs": [s.model_dump() for s in load_dialect_specs()],
     }
 
 

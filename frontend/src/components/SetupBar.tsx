@@ -19,7 +19,6 @@ export interface Setup {
   backtranslator_panel?: string[];
   attestors?: string[];
   varieties?: string[];
-  neutral_tag?: string;
   scenario?: string;
 }
 
@@ -106,6 +105,10 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   // changed tag cannot leave a stale pairing behind.
   const [contrastTag, setContrastTag] = usePersisted("setup.contrast", "");
   const [contrastQuery, setContrastQuery] = useState("");
+  // Which text the battery runs on. Remembered, because it is a variable of
+  // the experiment rather than a detail: what a contrast can find is bounded
+  // by what the text gives the two varieties to disagree about.
+  const [scenario, setScenario] = usePersisted("setup.scenario", "");
 
   // The model list, and a proposed instrument for whichever engine is selected.
   useEffect(() => {
@@ -184,6 +187,12 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
     }).catch(() => setDetail(null));
   }, [tag, engine]);
 
+  // Resolved once, so the start payload and the help text cannot disagree
+  // about which text is about to be sent.
+  const dialectSpecs: any[] = detail?.dialect_specs ?? [];
+  const scenarioText = (dialectSpecs.find((sp) => sp.id === scenario)
+    ?? dialectSpecs[0])?.scenario ?? "";
+
   const known = detail?.known?.[test];
   const subjectScript = detail?.language?.script ?? null;
   const family = (detail?.family ?? []).filter((f: any) => !f.inclusive);
@@ -231,8 +240,11 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
     backtranslator_panel: test === "capability"
       ? [reader, fallback].filter(Boolean) : undefined,
     attestors: test === "dialect" ? attestors : undefined,
+    scenario: test === "dialect" ? (scenarioText || undefined) : undefined,
     varieties: test === "dialect" ? varieties : undefined,
-    neutral_tag: test === "dialect" ? detail?.umbrella ?? undefined : undefined,
+    // The umbrella is not sent and not used. It was the conversion source
+    // until the probe became a 2×2 between the two arms; a battery has no
+    // third text now.
   });
 
   const choose = (fn: () => void) => { if (!locked) { setTouched(true); fn(); } };
@@ -340,9 +352,10 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                    offering a second tick for a question that takes one answer
                    invites a click that has to be taken back.
                    <br /><br />
-                   The umbrella tag is never offered: it is the conversion
-                   source, and pairing it against a variety leaves one
-                   answerable option, which is not a question.
+                   The umbrella tag is never offered. It is not a variety
+                   anyone could be asked to name, and it is no longer used for
+                   anything else either — it was the conversion source until
+                   that probe became a rewrite between the two arms.
                    <br /><br />
                    It is seeded with the family's <b>reference variety</b>:
                    the baseline every other variety in the class is measured
@@ -469,7 +482,40 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
             </Field>
           </>
         ) : (
-          <Field label={`Controls ${attestors.length}/${MAX_PANEL}`} wide
+          <>
+            <Field label="Scenario" wide
+                   info={<>
+                     The text both arms are asked to write, and then to convert
+                     between. It is the binding constraint on what this test can
+                     find: a passage containing nothing the two varieties
+                     disagree about cannot produce a difference however well the
+                     model knows them. Four rewrites of the conversion prompt
+                     produced identical results before that was noticed.
+                     <br /><br />
+                     These aim at the layer where regional variation actually
+                     lives — kinship, weather, food, time, place, motion — and
+                     deliberately not at register. Political and scientific
+                     prose is the most standardised part of a language, so a
+                     paragraph about institutions yields fewer markers than
+                     three sentences about a child and some milk.
+                     <br /><br />
+                     Each one names <i>concepts</i> and never forms, in the
+                     pivot language. That is what keeps this elicitation rather
+                     than prompting: the model still has to know how its own
+                     variety says these things.
+                   </>}>
+              <select className="field w-80 text-[12px]" value={scenario}
+                      disabled={!!locked}
+                      onChange={(e) => setScenario(e.target.value)}>
+                {dialectSpecs.map((sp: any) => (
+                  <option key={sp.id} value={sp.id}>
+                    {sp.id} — {sp.scenario.slice(0, 52)}…
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label={`Controls ${attestors.length}/${MAX_PANEL}`} wide
                  info={<>
                    The models that judge the dialect, blind. Unlike a reader
                    chain, <b>every one of these answers</b> — they are a panel,
@@ -495,7 +541,8 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                 </span>
               )}
             </div>
-          </Field>
+            </Field>
+          </>
         )}
       </div>
 
