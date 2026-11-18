@@ -34,7 +34,8 @@ from polyglot.core.client import NOT_CONFIGURED_MESSAGE, is_configured
 from polyglot.core.probe import lid
 from polyglot.core.probe.specs import load_specs
 from polyglot.core.scheme import load_scheme
-from polyglot.engine import runner
+from polyglot.engine import batch, runner
+from polyglot.engine.batch import BatchError
 from polyglot.engine.runner import RunError
 from polyglot.settings import METHOD_VERSION, settings
 from polyglot.store import create_all, session
@@ -535,6 +536,107 @@ def promote(verdict_id: int) -> dict:
         if row is None:
             raise HTTPException(404, f"No verdict {verdict_id}")
         return _verdict_dict(row)
+
+
+# -- coverage: every tag, and what is stored about it ---------------------------
+
+@app.get("/api/coverage")
+def coverage(engine: str, test_type: str = "capability",
+             scheme: str | None = None) -> dict:
+    """One row per tag in the loaded list, with its standing verdict or none.
+
+    The scheme is the spine, not the verdict table: a results page built from
+    what has been measured can only ever show what has been measured, and the
+    first question anyone brings to a coverage table is which languages are
+    *missing*. 602 rows is small enough to send whole and filter in the page,
+    which keeps every facet — script, macrolanguage, region, first letter —
+    one definition of the same list rather than six endpoints that can disagree.
+    """
+    sch = load_scheme(scheme or settings.scheme)
+    with session() as s:
+        rows = repo.list_verdicts(s, engine=engine, test_type=test_type)
+        by_tag = {r.tag: _verdict_dict(r) for r in rows}
+
+    classes: dict[str, int] = {}
+    for lang in sch.languages.values():
+        classes[lang.cls] = classes.get(lang.cls, 0) + 1
+
+    out = []
+    for lang in sch.languages.values():
+        v = by_tag.get(lang.tag)
+        out.append({
+            "tag": lang.tag, "name": lang.name, "local_name": lang.local_name,
+            "script": lang.script, "region": lang.region,
+            "region_name": lang.region_name, "macro": lang.macro,
+            "iso639_3": lang.iso639_3, "inclusive": lang.inclusive,
+            "cls": lang.cls, "class_size": classes.get(lang.cls, 1),
+            "verdict": v,
+        })
+    out.sort(key=lambda r: r["tag"])
+    return {"engine": engine, "test_type": test_type, "scheme": sch.meta.name,
+            "method_version": METHOD_VERSION, "rows": out}
+
+
+# -- batches -------------------------------------------------------------------
+
+class ScanBody(BaseModel):
+    engine: str
+    tags: list[str]
+    test_type: str = "capability"
+    #: none | drafts | all — which of the three states `current_verdict`
+    #: distinguishes may be measured again. See `engine.batch.RESCAN`.
+    rescan: str = "drafts"
+    scheme_name: str | None = None
+    judge_model: str | None = None
+    backtranslator_panel: list[str] | None = None
+    pivot: str | None = None
+    max_calls: int | None = None
+
+
+@app.post("/api/batches/preflight")
+def batch_preflight(body: ScanBody) -> dict:
+    """What the scan would do, and what it would cost. Spends nothing."""
+    try:
+        return batch.preflight(
+            engine=body.engine, tags=body.tags, test_type=body.test_type,
+            rescan=body.rescan, scheme_name=body.scheme_name,
+            max_calls=body.max_calls)
+    except BatchError as e:
+        raise _fail(e) from e
+
+
+@app.post("/api/batches", status_code=201)
+def start_batch(body: ScanBody) -> dict:
+    try:
+        started = batch.start(**body.model_dump())
+    except (BatchError, RunError) as e:
+        raise _fail(e) from e
+    return batch.snapshot(started["id"])
+
+
+@app.get("/api/batches")
+def list_batches(engine: str | None = None, limit: int = Query(20, le=100)) -> dict:
+    return {"batches": batch.listing(engine, limit)}
+
+
+@app.get("/api/batches/{batch_id}")
+def get_batch(batch_id: str) -> dict:
+    try:
+        return batch.snapshot(batch_id)
+    except BatchError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.post("/api/batches/{batch_id}/pause")
+def pause_batch(batch_id: str) -> dict:
+    """Stop after the item in flight.
+
+    Never mid-run: every call of that run is paid for by the time it could be
+    checked, so stopping sooner would only throw away an answer already bought.
+    The items it has not reached stay `pending`, which is what lets the same
+    scope be started again and pick up where it stopped.
+    """
+    return {"ok": batch.pause(batch_id), "batch": batch.snapshot(batch_id)}
 
 
 # -- the built frontend --------------------------------------------------------

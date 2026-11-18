@@ -299,3 +299,100 @@ def add_batch_item(s: Session, batch_id: str, data: dict) -> BatchItem:
     row = BatchItem(batch_id=batch_id, **data)
     s.add(row)
     return row
+
+
+def now() -> datetime:
+    """The clock, for callers outside this module that stamp a row directly."""
+    return _now()
+
+
+def get_batch(s: Session, batch_id: str) -> Batch | None:
+    return s.get(Batch, batch_id)
+
+
+def list_batches(s: Session, *, engine: str | None = None,
+                 limit: int = 20) -> list[Batch]:
+    q = select(Batch)
+    if engine:
+        q = q.where(Batch.engine == engine)
+    return list(s.scalars(q.order_by(Batch.created_at.desc()).limit(limit)))
+
+
+def batch_items(s: Session, batch_id: str) -> list[BatchItem]:
+    return list(s.scalars(select(BatchItem)
+                          .where(BatchItem.batch_id == batch_id)
+                          .order_by(BatchItem.id)))
+
+
+def next_batch_item(s: Session, batch_id: str) -> BatchItem | None:
+    """The next class to measure, in plan order.
+
+    Pending only: an item that already ran keeps its row, which is what lets a
+    killed scan restart where it stopped rather than from zero.
+    """
+    return s.scalar(select(BatchItem)
+                    .where(BatchItem.batch_id == batch_id,
+                           BatchItem.status == "pending")
+                    .order_by(BatchItem.id).limit(1))
+
+
+def _item(s: Session, batch_id: str, representative: str) -> BatchItem | None:
+    return s.scalar(select(BatchItem).where(
+        BatchItem.batch_id == batch_id,
+        BatchItem.representative == representative))
+
+
+def set_batch_item_run(s: Session, batch_id: str, representative: str,
+                       run_id: str) -> None:
+    row = _item(s, batch_id, representative)
+    if row is not None:
+        row.run_id = run_id
+
+
+def attach_run_to_batch(s: Session, run_id: str, batch_id: str) -> None:
+    """Join the run to the batch that asked for it.
+
+    The join is the point: a batch's runs are the *same* runs the
+    single-language page produces, so any item opens on the page that recorded
+    it. A parallel record of a parallel pipeline would drift, and nobody would
+    notice until the numbers disagreed.
+    """
+    row = s.get(Run, run_id)
+    if row is not None:
+        row.batch_id = batch_id
+
+
+def finish_batch_item(s: Session, batch_id: str, representative: str, *,
+                      status: str, error: str | None = None) -> None:
+    """Close an item.
+
+    `skip_reason` is deliberately not touched here: it answers "why was this
+    not measured", and writing an outcome into it — "3 tags inherited" — would
+    make a column the progress view reads as a skip explanation say something
+    else on the rows that were not skipped. How many tags inherited is derivable
+    from `members`, which is already on the row.
+    """
+    row = _item(s, batch_id, representative)
+    if row is None:
+        return
+    row.status = status
+    row.error = error
+    row.finished_at = _now()
+
+
+def set_batch_calls(s: Session, batch_id: str, calls_used: int) -> None:
+    row = s.get(Batch, batch_id)
+    if row is not None:
+        row.calls_used = calls_used
+
+
+def finish_batch(s: Session, batch_id: str, *, status: str,
+                 error: str | None = None, calls_used: int | None = None) -> None:
+    row = s.get(Batch, batch_id)
+    if row is None:
+        return
+    row.status = status
+    row.error = error
+    if calls_used is not None:
+        row.calls_used = calls_used
+    row.finished_at = _now()

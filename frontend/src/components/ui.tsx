@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { Tone } from "../types";
+import type { ModelRow, Tone } from "../types";
 
 export const toneText: Record<string, string> = {
   ok: "text-ok", warn: "text-warn", bad: "text-bad", "": "text-ink-faint",
@@ -271,6 +271,131 @@ export function Combo<T>({ value, items, render, keyOf, onPick, placeholder, que
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* -- the setup controls -------------------------------------------------------
+ *
+ * Shared, and that is the point rather than a convenience: the single-language
+ * page and the scan page ask the same kinds of question — which model, which
+ * reader, which judge — and two sets of controls that merely *looked* alike
+ * would drift the first time one of them was improved. Every bar on this
+ * application is built from these.
+ */
+
+/** A group heading. No number on it: the bands already run left to right and
+ *  top to bottom, which is how anyone reads them, and a numeral per control is
+ *  furniture that has to be looked past rather than read. */
+export function GroupLabel({ label, info, wide }: {
+  label: string; info?: React.ReactNode; wide?: boolean;
+}) {
+  return (
+    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap pt-0.5
+                     text-[11px] font-semibold uppercase tracking-wider
+                     text-ink-faint">
+      {label}
+      {info && <Info wide={wide}>{info}</Info>}
+    </span>
+  );
+}
+
+export function Field({ label, info, children, wide }: {
+  label: string; info?: React.ReactNode; children: React.ReactNode;
+  /** Widens the info bubble, for the fields whose note is reference text
+   *  rather than a sentence. */
+  wide?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1"><GroupLabel label={label} info={info} wide={wide} /></div>
+      {children}
+    </div>
+  );
+}
+
+export function Toggle({ on, label, onClick, dim }: {
+  on: boolean; label: string; onClick: () => void; dim?: boolean;
+}) {
+  return (
+    <button onClick={onClick}
+      title={dim ? "The panel is full — deselect one first." : undefined}
+      className={`chip font-mono transition-colors ${
+        on ? "border-accent bg-accent-soft text-accent"
+           : dim ? "opacity-25"
+           : "opacity-60 hover:opacity-100"}`}>
+      {label}
+    </button>
+  );
+}
+
+export function Pick({ models, binding, value, onChange, locked, none }: {
+  models: ModelRow[]; binding: boolean; value: string;
+  onChange: (v: string) => void; locked?: boolean;
+  /** Label for the empty option where empty is a real answer, as it is for a
+   *  fallback. Absent means the field is required and reads "choose…". */
+  none?: string;
+}) {
+  if (!models.length && !binding) {
+    return <input className="field w-64 font-mono text-[12px]" value={value}
+                  disabled={locked} placeholder="model id"
+                  onChange={(e) => onChange(e.target.value)} />;
+  }
+  return (
+    <select className="field w-64 font-mono text-[12px]" value={value}
+            disabled={locked} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{none ?? "choose…"}</option>
+      {!models.some((m) => m.id === value) && value &&
+        <option value={value}>{value}</option>}
+      {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+    </select>
+  );
+}
+
+export function ModelPick({ models, value, onChange, locked }: {
+  models: ModelRow[]; value: string; onChange: (v: string) => void; locked?: boolean;
+}) {
+  if (!models.length) {
+    return <input className="field w-56" value={value} placeholder="model id"
+                  disabled={locked} onChange={(e) => onChange(e.target.value)} />;
+  }
+  return (
+    <select className="field w-56" value={value} disabled={locked}
+            onChange={(e) => onChange(e.target.value)}>
+      {!models.some((m) => m.id === value) && value &&
+        <option value={value}>{value}</option>}
+      {models.map((m) => (
+        <option key={m.id} value={m.id}>{m.title || m.id}</option>
+      ))}
+    </select>
+  );
+}
+
+export function Segment({ value, onChange, options, locked, unavailable }: {
+  value: string; onChange: (v: string) => void; options: [string, string][];
+  locked?: boolean;
+  /** Options that exist but cannot be chosen here, mapped to the sentence
+   *  saying why. Shown rather than hidden: an option missing from a segment
+   *  reads as an option the tool does not have, and "the scan cannot do this
+   *  *yet*, for this reason" is a different and more useful statement. */
+  unavailable?: Record<string, string>;
+}) {
+  return (
+    <div className={`flex rounded-md border border-line p-0.5 ${
+      locked ? "opacity-50" : ""}`}>
+      {options.map(([v, l]) => {
+        const why = unavailable?.[v];
+        return (
+          <button key={v} disabled={locked || !!why} onClick={() => onChange(v)}
+            title={why ?? (locked ? "A run is open — abort it to change this." : undefined)}
+            className={`rounded px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
+              value === v ? "bg-accent text-white"
+                : why ? "cursor-not-allowed text-ink-faint opacity-40"
+                : locked ? "text-ink-faint" : "text-ink-soft hover:bg-line-soft"}`}>
+            {l}
+          </button>
+        );
+      })}
     </div>
   );
 }

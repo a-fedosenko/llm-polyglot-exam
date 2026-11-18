@@ -155,3 +155,88 @@ export interface VerdictRow {
   notes: string[] | null;
   detail: Record<string, any> | null;
 }
+
+/** One tag of the loaded locale list, with whatever is stored about it.
+ *
+ *  The scheme is the spine rather than the verdict table: a coverage page built
+ *  from what has been measured can only ever show what has been measured, and
+ *  the first question anyone brings to one is which languages are *missing*. */
+export interface CoverageRow {
+  tag: string;
+  name: string | null;
+  local_name: string | null;
+  script: string | null;
+  region: string | null;
+  region_name: string | null;
+  macro: string | null;
+  iso639_3: string | null;
+  inclusive: boolean;
+  cls: string;
+  class_size: number;
+  verdict: (VerdictRow & { inherited_from?: string | null; cls?: string | null }) | null;
+}
+
+/** Which of the three states the skip rule distinguishes a scan may measure
+ *  again. Not a boolean, because "never measured", "measured but nobody signed
+ *  off" and "a person stood behind it" are three different questions. */
+export type Rescan = "none" | "drafts" | "all";
+
+export interface BatchPlanItem {
+  cls: string;
+  representative: string;
+  members: string[];
+  language: string | null;
+  script: string | null;
+  designator: string;
+  divergent_siblings: string[];
+  inherits: number;
+  skip_reason: string | null;
+  known_level: string | null;
+  known_approved: boolean;
+}
+
+export interface BatchPlan {
+  engine: string;
+  test_type: TestType;
+  rescan: Rescan;
+  scheme: string;
+  requested_tags: number;
+  unknown_tags: string[];
+  classes: number;
+  to_scan: number;
+  inheriting_tags: number;
+  skipped: Record<string, number>;
+  divergent_siblings: string[];
+  estimated_calls: { minimum: number; typical: number; maximum: number };
+  max_calls: number | null;
+  over_budget: boolean;
+  items: BatchPlanItem[];
+}
+
+export interface BatchItem {
+  cls: string;
+  representative: string;
+  members: string[];
+  status: "pending" | "running" | "done" | "skipped" | "failed";
+  skip_reason: string | null;
+  run_id: string | null;
+  error: string | null;
+  finished_at: string | null;
+}
+
+export interface BatchSnapshot {
+  id: string;
+  status: "running" | "done" | "cancelled" | "halted" | "failed" | "interrupted";
+  engine: string;
+  test_type: TestType;
+  rescan: Rescan;
+  max_calls: number | null;
+  calls_used: number;
+  error: string | null;
+  unknown_tags: string[];
+  plan: BatchPlan | null;
+  running_run_id: string | null;
+  created_at: string | null;
+  finished_at: string | null;
+  items: BatchItem[];
+}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Proposal } from "../api";
 import type { LanguageRow, ModelRow, TestType } from "../types";
-import { Badge, Combo, Info } from "./ui";
+import { Badge, Combo, Field, ModelPick, Pick, Segment, Toggle } from "./ui";
 
 //: Mirrors `MIN_ATTESTORS` / `MAX_ATTESTORS` in the engine, which is where the
 //: rule is enforced. Here it only shapes the controls; the page is not the
@@ -136,17 +136,31 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       // variety leaves one answerable option, which is not a question.
       // The subject is always arm one. Only the opposing arm is a choice, and
       // it is seeded with the first sibling so the common case is one click.
-      const named = (d.family ?? []).filter((f: any) => !f.inclusive);
+      // Same alphabet as the subject, for the reason the engine refuses a
+      // mixed pair: a control model told to tell Cyrillic from Latin would be
+      // right about the script and say nothing about the variety.
+      const script = d.language?.script ?? null;
+      const named = (d.family ?? []).filter(
+        (f: any) => !f.inclusive && (!script || !f.script || f.script === script));
       const other = named.find((f: any) => f.tag !== tag);
       setVarieties(other ? [tag, other.tag] : [tag]);
     }).catch(() => setDetail(null));
   }, [tag, engine]);
 
   const known = detail?.known?.[test];
+  const subjectScript = detail?.language?.script ?? null;
   const family = (detail?.family ?? []).filter((f: any) => !f.inclusive);
   // The opposing arm is the only thing there is to choose: the subject is
   // always arm one, so it is not offered again as something to pick.
-  const siblings = family.filter((f: any) => f.tag !== tag);
+  //
+  // Siblings in a *different alphabet* are not offered at all. A digraphic
+  // family spans scripts — `sr-ME-Cyrl` and `sr-ME-Latn` are one variety
+  // written twice — and an arm from the other one turns the contrast probe
+  // into a script check that reads as dialect knowledge. The engine refuses
+  // such a pair; not offering it here means never being refused.
+  const siblings = family.filter(
+    (f: any) => f.tag !== tag
+      && (!subjectScript || !f.script || f.script === subjectScript));
   const contrast = siblings.find((f: any) => varieties.includes(f.tag)) ?? null;
   // Filtered here rather than over the API: a family is a handful of rows that
   // are already loaded, and a round trip to narrow six of them would be slower
@@ -292,6 +306,13 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                    The umbrella tag is never offered: it is the conversion
                    source, and pairing it against a variety leaves one
                    answerable option, which is not a question.
+                   <br /><br />
+                   Neither is a sibling in a <i>different alphabet</i>. A
+                   digraphic family spans scripts — <span className="font-mono">
+                   sr-ME-Cyrl</span> and <span className="font-mono">sr-ME-Latn
+                   </span> are one variety written twice — and a control model
+                   told to tell those apart would be reading the script and
+                   saying nothing about the variety.
                  </>}>
             {!tag ? (
               <div className="flex h-[30px] items-center text-[11px] text-ink-faint">
@@ -464,113 +485,6 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
           )}
         </span>
       </div>
-    </div>
-  );
-}
-
-/** A group heading. No number on it: the bands already run left to right and
- *  top to bottom, which is how anyone reads them, and a numeral per control is
- *  furniture that has to be looked past rather than read. */
-function GroupLabel({ label, info, wide }: {
-  label: string; info?: React.ReactNode; wide?: boolean;
-}) {
-  return (
-    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap pt-0.5
-                     text-[11px] font-semibold uppercase tracking-wider
-                     text-ink-faint">
-      {label}
-      {info && <Info wide={wide}>{info}</Info>}
-    </span>
-  );
-}
-
-function Field({ label, info, children, wide }: {
-  label: string; info?: React.ReactNode; children: React.ReactNode;
-  /** Widens the info bubble, for the fields whose note is reference text
-   *  rather than a sentence. */
-  wide?: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1"><GroupLabel label={label} info={info} wide={wide} /></div>
-      {children}
-    </div>
-  );
-}
-
-function Toggle({ on, label, onClick, dim }: {
-  on: boolean; label: string; onClick: () => void; dim?: boolean;
-}) {
-  return (
-    <button onClick={onClick}
-      title={dim ? "The panel is full — deselect one first." : undefined}
-      className={`chip font-mono transition-colors ${
-        on ? "border-accent bg-accent-soft text-accent"
-           : dim ? "opacity-25"
-           : "opacity-60 hover:opacity-100"}`}>
-      {label}
-    </button>
-  );
-}
-
-function Pick({ models, binding, value, onChange, locked, none }: {
-  models: ModelRow[]; binding: boolean; value: string;
-  onChange: (v: string) => void; locked?: boolean;
-  /** Label for the empty option where empty is a real answer, as it is for a
-   *  fallback. Absent means the field is required and reads "choose…". */
-  none?: string;
-}) {
-  if (!models.length && !binding) {
-    return <input className="field w-64 font-mono text-[12px]" value={value}
-                  disabled={locked} placeholder="model id"
-                  onChange={(e) => onChange(e.target.value)} />;
-  }
-  return (
-    <select className="field w-64 font-mono text-[12px]" value={value}
-            disabled={locked} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{none ?? "choose…"}</option>
-      {!models.some((m) => m.id === value) && value &&
-        <option value={value}>{value}</option>}
-      {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
-    </select>
-  );
-}
-
-function ModelPick({ models, value, onChange, locked }: {
-  models: ModelRow[]; value: string; onChange: (v: string) => void; locked?: boolean;
-}) {
-  if (!models.length) {
-    return <input className="field w-56" value={value} placeholder="model id"
-                  disabled={locked} onChange={(e) => onChange(e.target.value)} />;
-  }
-  return (
-    <select className="field w-56" value={value} disabled={locked}
-            onChange={(e) => onChange(e.target.value)}>
-      {!models.some((m) => m.id === value) && value &&
-        <option value={value}>{value}</option>}
-      {models.map((m) => (
-        <option key={m.id} value={m.id}>{m.title || m.id}</option>
-      ))}
-    </select>
-  );
-}
-
-function Segment({ value, onChange, options, locked }: {
-  value: string; onChange: (v: string) => void; options: [string, string][];
-  locked?: boolean;
-}) {
-  return (
-    <div className={`flex rounded-md border border-line p-0.5 ${
-      locked ? "opacity-50" : ""}`}>
-      {options.map(([v, l]) => (
-        <button key={v} disabled={locked} onClick={() => onChange(v)}
-          title={locked ? "A run is open — abort it to change this." : undefined}
-          className={`rounded px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
-            value === v ? "bg-accent text-white"
-              : locked ? "text-ink-faint" : "text-ink-soft hover:bg-line-soft"}`}>
-          {l}
-        </button>
-      ))}
     </div>
   );
 }

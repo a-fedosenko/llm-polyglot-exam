@@ -1,6 +1,20 @@
 import type {
-  Call, LanguageRow, ModelRow, Planned, RunSnapshot, Step, VerdictRow,
+  BatchPlan, BatchSnapshot, Call, CoverageRow, LanguageRow, ModelRow, Planned,
+  RunSnapshot, Step, VerdictRow,
 } from "./types";
+
+/** What a scan is asked for. The same body plans it and starts it, so what you
+ *  read in the pre-flight is what runs — a plan built from a different request
+ *  than the one sent would describe a scan that is not about to happen. */
+export interface ScanRequest {
+  engine: string;
+  tags: string[];
+  test_type?: string;
+  rescan?: string;
+  judge_model?: string | null;
+  backtranslator_panel?: string[];
+  max_calls?: number | null;
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`/api${path}`, {
@@ -114,4 +128,18 @@ export const api = {
   approve: (id: number, approved = true) =>
     post<VerdictRow>(`/verdicts/${id}/approve?approved=${approved}`),
   promote: (id: number) => post<VerdictRow>(`/verdicts/${id}/promote`),
+
+  coverage: (engine: string, test_type = "capability") =>
+    req<{ rows: CoverageRow[]; scheme: string; method_version: string }>(
+      `/coverage?${new URLSearchParams({ engine, test_type })}`),
+
+  /** Costs nothing, which is the whole point of it: this is the thing you read
+   *  before committing a few thousand calls. */
+  planScan: (body: ScanRequest) => post<BatchPlan>("/batches/preflight", body),
+  startScan: (body: ScanRequest) => post<BatchSnapshot>("/batches", body),
+  batch: (id: string) => req<BatchSnapshot>(`/batches/${id}`),
+  batches: (engine?: string) => req<{ batches: any[] }>(
+    `/batches${engine ? `?engine=${encodeURIComponent(engine)}` : ""}`),
+  pauseScan: (id: string) =>
+    post<{ ok: boolean; batch: BatchSnapshot }>(`/batches/${id}/pause`),
 };

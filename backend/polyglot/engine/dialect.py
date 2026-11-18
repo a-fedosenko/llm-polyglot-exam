@@ -173,6 +173,52 @@ class DialectMachine:
                 f"A contrast needs two named varieties; got {[v.tag for v in named]}. "
                 "The umbrella tag is the conversion source, not a contrast arm.")
 
+        # **Both arms must be written in the same alphabet.**
+        #
+        # A digraphic language's family spans scripts: `sr-ME-Cyrl` and
+        # `sr-ME-Latn` are one variety written twice. Pairing arms across that
+        # line does not measure dialect knowledge — a control model asked which
+        # variety a text is would answer from the alphabet, and would be right
+        # for a reason that has nothing to do with Montenegrin. That is a false
+        # positive of exactly the kind the manufactured controls exist to
+        # prevent, and it cannot be caught by them: both arms really are
+        # different, so identity and order both pass.
+        scripts = {v.script for v in named}
+        if len(scripts) > 1:
+            raise ValueError(
+                f"The two arms are written in different alphabets "
+                f"({', '.join(sorted(str(s) for s in scripts))}). A control "
+                f"model told to tell them apart would be reading the script, "
+                f"not the variety, and would look like dialect knowledge while "
+                f"being none. Contrast two varieties in one alphabet.")
+        arm_script = next(iter(scripts))
+
+        # **The conversion source has to be in the arms' alphabet too.**
+        #
+        # P3 rewrites neutral text into the variety and *the diff is the
+        # measurement*. The umbrella tag carries its own script — `sr` is
+        # Cyrillic — so a Latin-script battery was handed Cyrillic text to
+        # rewrite. The model then did the only sensible thing and transliterated
+        # it, every token changed, and a correct conversion scored as
+        # `paraphrased, not converted`: a guaranteed false negative, and P4
+        # unscoreable behind it.
+        #
+        # Asking the neutral arm for the arms' alphabet fixes it at the source
+        # rather than at the scorer. Scoring the diff "by sense" instead would
+        # not: the model would still have been asked to do two jobs — convert
+        # *and* transliterate — and the variety's own alternations would still
+        # be buried in a wholly rewritten text. It would also cost a model call,
+        # and P3's whole value is that it settles negatives for free.
+        #
+        # Only the script is overridden, through `candidates_for` like every
+        # other designator, so "Serbian (Latin script)" is derived rather than
+        # spelled out here.
+        self.neutral_script_adjusted = (arm_script is not None
+                                        and neutral.script != arm_script)
+        if self.neutral_script_adjusted:
+            neutral = neutral.model_copy(update={"script": arm_script})
+
+        self.arm_script = arm_script
         self.scheme, self.tag, self.engine, self.client = scheme, tag, engine, client
         self.lang, self.neutral, self.named = lang, neutral, named
         self.scenario, self.corpus, self.record = scenario, corpus, record
@@ -239,7 +285,14 @@ class DialectMachine:
             "tag": self.tag, "language": self.lang.name,
             "designator": self.designator,
             "neutral": {"tag": self.neutral.tag,
-                        "designator": _designator_for(self.scheme, self.neutral)},
+                        "designator": _designator_for(self.scheme, self.neutral),
+                        #: True when the umbrella tag's own alphabet is not the
+                        #: one both arms are written in, so the conversion
+                        #: source was asked for in theirs. Surfaced rather than
+                        #: done quietly: it changes what was sent, and the step
+                        #: that sent it is on the page.
+                        "script_adjusted": self.neutral_script_adjusted,
+                        "script": self.arm_script},
             "varieties": [{"tag": v.tag, "region": v.region_name,
                            "designator": _designator_for(self.scheme, v),
                            "is_subject": v.tag == self.tag} for v in self.named],
@@ -377,6 +430,7 @@ class DialectMachine:
     def _plan_produce(self, variety: Language) -> Planned:
         from polyglot.core.probe import designator as dsg
 
+        variety = self._arm(variety.tag) or variety
         d = _designator_for(self.scheme, variety)
         system, user = dsg.generation_prompt(
             d, self.scenario, 3,
@@ -496,8 +550,18 @@ class DialectMachine:
             tone="ok" if self.field else "bad",
             result=self.preflight())
 
+    def _arm(self, tag: str) -> Language | None:
+        """The Language object an arm is actually asked under.
+
+        The neutral arm may carry an overridden script, and the override has to
+        reach the gate as well as the prompt: text generated under "Serbian
+        (Latin script)" and then gated against Cyrillic would fail the gate for
+        doing exactly what it was told.
+        """
+        return self.neutral if tag == self.neutral.tag else self.scheme.get(tag)
+
     def _do_produce(self, planned: Planned, sent: list[Call]) -> Executed:
-        variety = self.scheme.get(str(planned.context["tag"]))
+        variety = self._arm(str(planned.context["tag"]))
         assert variety is not None
         call = sent[0]
         item = _produce(client=self.client, engine=call.model, lang=variety,

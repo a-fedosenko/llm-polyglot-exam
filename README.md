@@ -4,7 +4,7 @@
 
 Vendor language lists are marketing. "Supports 100+ languages" has no definition behind it, and for the long tail nobody publishes anything at all. This tool measures it instead: it generates text, checks the text locally, has it read back by a reader whose competence in that language has been demonstrated, and grades what survived.
 
-> **Status: the single-language page works end to end.** Both tests, both modes, full persistence. The batch page — the same engine in a loop down a 602-locale list — is the next piece of work, and its tables are already in the schema so the two cannot drift apart.
+> **Status: both pages work end to end.** The single-language page runs both tests in both modes with full persistence. The coverage page lists every tag of the loaded locale list against one engine, and scans a scope of it — one equivalence class at a time, through the same `plan()`/`execute()` loop, writing the same runs. A dialect *scan* is the piece still missing, and for a stated reason: a battery needs a contrast pair per family, which no locale list carries.
 >
 > This is a rewrite of [llm-language-checker](https://github.com/a-fedosenko/llm-language-checker). The method is that project's, validated by twenty-one recorded experiments; what changed is everything around it. See [What changed, and why](#what-changed-and-why).
 

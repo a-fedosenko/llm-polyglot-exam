@@ -1,5 +1,19 @@
 # Next: the batch page
 
+## Where this stands (2026-11-18)
+
+**Built and tested**: the capability scan. `engine/batch.py` plans for free, queues one class at a time through `runner.drive` — the same loop the page steps by hand — propagates the class result to its other tags as `inherited_from`, updates `calls_used` during the scan, and enforces `max_calls` by refusing to start a class it cannot pay for. The page is `Coverage & scan`: the locale list is its spine, so the tags with nothing stored are visible rather than absent, and the scope you are reading is the scan set. `tests/test_batch.py` pins the rules the schema cannot.
+
+**Decided**, of the three below:
+
+- *What a dialect batch iterates over* — still open, and deliberately: a scan needs the contrast sibling per family recorded first, and that information does not exist yet. The scan refuses a dialect test type in words rather than guessing a pairing. Stored dialect verdicts are still shown in the table.
+- *Whether a batch may auto-approve* — no, and the tests hold it. The review queue ordered by what a human pass would buy is not built.
+- *The budget* — `max_calls` fails closed, compared against the plan's floor, because a queue can only be stopped between items.
+
+*Class collapse* stays as it was: the cheap option, with `divergent_siblings` named in the pre-flight and every inherited row labelled.
+
+---
+
 The single-language page is done. This is what the batch page needs, what is already built for it, and the three decisions that should be settled before it is.
 
 ## What is already there

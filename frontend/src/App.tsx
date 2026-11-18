@@ -6,6 +6,7 @@ import { SetupBar, type Setup } from "./components/SetupBar";
 import { Stage } from "./components/Stage";
 import { StepRail } from "./components/StepRail";
 import { VerdictPanel } from "./components/VerdictPanel";
+import { CoveragePage } from "./components/CoveragePage";
 import { Confirm, Empty, Info } from "./components/ui";
 
 //: Where the open run's id is kept across a page reload.
@@ -16,7 +17,16 @@ import { Confirm, Empty, Info } from "./components/ui";
 //: storage rather than local: a run belongs to the tab that opened it.
 const OPEN_RUN = "polyglot.open-run";
 
+//: The two things this tool does, and they are two pages rather than two modes
+//: of one: measuring a single language is something you *watch*, and what has
+//: been measured of a model is something you *read*. They share the engine, the
+//: schema and every control on their setup bars — a run opened from the
+//: coverage table is the same run the single-language page recorded, because
+//: there is only ever one kind of run.
+type Page = "test" | "coverage";
+
 export default function App() {
+  const [page, setPage] = useState<Page>("test");
   const [config, setConfig] = useState<Config | null>(null);
   const [run, setRun] = useState<RunSnapshot | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
@@ -222,9 +232,32 @@ export default function App() {
     ? "No model endpoint is configured — see the banner below."
     : null;
 
+  // Any item of a scan opens on this page, read-only if it has finished. That
+  // is most of the value of having built both pages against one schema.
+  const openRun = async (runId: string) => {
+    setError(null);
+    try {
+      const snap = await api.run(runId);
+      setRun(snap);
+      setAdjudication(snap.adjudication ?? null);
+      setSelected(null); following.current = true;
+      setPage("test");
+      if (snap.status === "running" && snap.auto) watch(runId);
+    } catch (e: any) { setError(e.message); }
+  };
+
+  if (page === "coverage") {
+    return (
+      <div className="flex h-full flex-col">
+        <TopBar config={config} run={run} page={page} onPage={setPage} />
+        <CoveragePage onOpenRun={openRun} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <TopBar config={config} run={run} />
+      <TopBar config={config} run={run} page={page} onPage={setPage} />
 
       <SetupBar onStart={start} busy={busy} disabled={blocked} locked={locked} />
 
@@ -296,12 +329,26 @@ export default function App() {
   );
 }
 
-function TopBar({ config, run }: { config: Config | null; run: RunSnapshot | null }) {
+function TopBar({ config, run, page, onPage }: {
+  config: Config | null; run: RunSnapshot | null;
+  page: Page; onPage: (p: Page) => void;
+}) {
   return (
     <header className="flex items-center gap-3 border-b border-line bg-panel px-4 py-2">
       <span className="text-[13px] font-semibold tracking-tight text-ink">
         Polyglot Exam
       </span>
+      <nav className="flex rounded-md border border-line p-0.5">
+        {([["test", "Single test"], ["coverage", "Coverage & scan"]] as [Page, string][])
+          .map(([p, label]) => (
+            <button key={p} onClick={() => onPage(p)}
+              className={`rounded px-2.5 py-1 text-[12.5px] font-medium transition-colors ${
+                page === p ? "bg-accent text-white"
+                           : "text-ink-soft hover:bg-line-soft"}`}>
+              {label}
+            </button>
+          ))}
+      </nav>
       <span className="chip" title="Part of every verdict's identity. A bump makes stored verdicts stale rather than wrong — they were true of an earlier instrument.">
         method {config?.method_version ?? "…"}
       </span>
@@ -489,6 +536,23 @@ function Plan({ plan, testType }: { plan: any; testType: string }) {
               {(plan.options ?? []).join(" vs ")}
             </span>
           </Row>
+          {plan.neutral && (
+            <Row label="rewritten from">
+              <span className="font-mono text-[12px] text-ink-soft">
+                {plan.neutral.designator}
+              </span>
+              {plan.neutral.script_adjusted && (
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                  The umbrella tag <span className="font-mono">{plan.neutral.tag}</span>{" "}
+                  is written in another alphabet, so the conversion source was
+                  asked for in this pair's. Handing the rewrite text in the
+                  wrong script makes a correct conversion score as a paraphrase:
+                  every token moves, and what moved is transliteration rather
+                  than the variety.
+                </p>
+              )}
+            </Row>
+          )}
           <Row label="control models">
             <span className="font-mono text-[12px] text-ink-soft">
               {(plan.attestors ?? []).join(", ") || "none eligible"}

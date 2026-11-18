@@ -23,6 +23,7 @@ import threading
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from polyglot.core.bt import RemoteBackTranslator
@@ -447,37 +448,51 @@ def set_panel(sess: Session, attestors: list[str]) -> dict:
     return pre
 
 
-def run_auto(sess: Session) -> None:
-    """Drive the run to completion on a background thread.
+def drive(sess: Session, *, on_step: Callable[[Session], None] | None = None) -> None:
+    """Drive the run to completion on the calling thread.
 
     The same `plan`/`execute` pair manual mode uses, in a loop. Auto mode is not
     a second path through the method; it is the absence of a pause.
+
+    Separated from `run_auto` so a batch can drive an item *synchronously* —
+    one run at a time, because SQLite takes one writer and two concurrent scans
+    would spend against a budget neither of them set. A batch that span up its
+    own copy of this loop would be the second traversal the method cannot
+    afford; it calls this one instead.
+
+    `on_step` fires after every executed step, which is how a batch's
+    `calls_used` can be true *during* the scan rather than at the end of it.
     """
-    def drive() -> None:
-        sess.auto = True
-        try:
-            while sess.status == "running" and not sess.cancel:
-                planned = sess.machine.plan()  # type: ignore[attr-defined]
-                if planned is None:
-                    _finish(sess)
-                    break
-                sess.pending = planned
-                step(sess)
-            if sess.cancel and sess.status == "running":
-                sess.status = "cancelled"
-                _close(sess)
-                with session() as s:
-                    repo.finish_run(s, sess.id, status="cancelled")
-        except Exception as e:  # noqa: BLE001
-            sess.status = "failed"
-            sess.error = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}"
+    sess.auto = True
+    try:
+        while sess.status == "running" and not sess.cancel:
+            planned = sess.machine.plan()  # type: ignore[attr-defined]
+            if planned is None:
+                _finish(sess)
+                break
+            sess.pending = planned
+            step(sess)
+            if on_step is not None:
+                on_step(sess)
+        if sess.cancel and sess.status == "running":
+            sess.status = "cancelled"
             _close(sess)
             with session() as s:
-                repo.finish_run(s, sess.id, status="failed", error=sess.error)
-        finally:
-            sess.auto = False
+                repo.finish_run(s, sess.id, status="cancelled")
+    except Exception as e:  # noqa: BLE001
+        sess.status = "failed"
+        sess.error = f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}"
+        _close(sess)
+        with session() as s:
+            repo.finish_run(s, sess.id, status="failed", error=sess.error)
+    finally:
+        sess.auto = False
 
-    threading.Thread(target=drive, daemon=True, name=f"run-{sess.id}").start()
+
+def run_auto(sess: Session) -> None:
+    """`drive`, on a background thread, for the single-language page."""
+    threading.Thread(target=drive, args=(sess,), daemon=True,
+                     name=f"run-{sess.id}").start()
 
 
 def _spent(sess: Session) -> dict:
