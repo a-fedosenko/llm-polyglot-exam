@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Proposal } from "../api";
+import { usePersisted } from "../persist";
 import type { LanguageRow, ModelRow, TestType } from "../types";
 import { Badge, Combo, Field, ModelPick, Pick, Segment, Toggle } from "./ui";
 
@@ -67,10 +68,14 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
    *  page lie about what it was showing. */
   locked?: string | null;
 }) {
-  const [test, setTest] = useState<TestType>("capability");
-  const [mode, setMode] = useState<"manual" | "auto">("manual");
-  const [engine, setEngine] = useState("");
-  const [tag, setTag] = useState("");
+  // Remembered across reloads. Which model, which language, which test is what
+  // an operator is *working on*, and losing it to a page refresh means picking
+  // three dropdowns again before anything can happen. The search box is not
+  // remembered: a filter restored invisibly is a list that looks wrong.
+  const [test, setTest] = usePersisted<TestType>("setup.test", "capability");
+  const [mode, setMode] = usePersisted<"manual" | "auto">("setup.mode", "manual");
+  const [engine, setEngine] = usePersisted("setup.engine", "");
+  const [tag, setTag] = usePersisted("setup.tag", "");
   const [query, setQuery] = useState("");
   const [langs, setLangs] = useState<LanguageRow[]>([]);
   const [detail, setDetail] = useState<any>(null);
@@ -80,17 +85,26 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
   const [source, setSource] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
 
-  const [judge, setJudge] = useState("");
+  const [judge, setJudge] = usePersisted("setup.judge", "");
   // Two named slots rather than a list. `route()` still takes an ordered panel
   // and stops at the first that qualifies, so the wire format is unchanged —
   // but "reader, and one to fall back to" is the whole of what anyone needs to
   // say, and a bespoke reorderable chain said it in a shape nothing else on
   // this page uses.
-  const [reader, setReader] = useState("");
-  const [fallback, setFallback] = useState("");
-  const [attestors, setAttestors] = useState<string[]>([]);
-  const [touched, setTouched] = useState(false);
+  const [reader, setReader] = usePersisted("setup.reader", "");
+  const [fallback, setFallback] = usePersisted("setup.fallback", "");
+  const [attestors, setAttestors] = usePersisted<string[]>("setup.attestors", []);
+  // Persisted with the rest, and load-bearing: `touched` is what stops the
+  // proposal from overwriting a chosen instrument. Without it a reload would
+  // restore your reader and then the first `/api/models` reply would quietly
+  // replace it with the proposed one — which looks exactly like the page
+  // having forgotten.
+  const [touched, setTouched] = usePersisted("setup.touched", false);
   const [varieties, setVarieties] = useState<string[]>([]);
+  // Only the opposing arm is remembered; arm one is always the subject. It is
+  // restored only if it is still a sibling of the restored language, so a
+  // changed tag cannot leave a stale pairing behind.
+  const [contrastTag, setContrastTag] = usePersisted("setup.contrast", "");
   const [contrastQuery, setContrastQuery] = useState("");
 
   // The model list, and a proposed instrument for whichever engine is selected.
@@ -106,14 +120,30 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       // A proposal replaces an untouched instrument and never overwrites a
       // chosen one: changing the engine should move the panel off the engine's
       // own family, and must not silently undo a deliberate pick.
-      if (r.propose && !touched) {
-        setJudge(r.propose.judge ?? "");
-        setReader(r.propose.backtranslator_panel[0] ?? "");
-        setFallback(r.propose.backtranslator_panel[1] ?? "");
-        // Deliberately not proposed. A reader is one or two calls; a control
-        // panel is five per model, and a pre-ticked panel is a spend nobody
-        // chose.
-        setAttestors([]);
+      if (r.propose) {
+        const p = r.propose;
+        if (!touched) {
+          setJudge(p.judge ?? "");
+          setReader(p.backtranslator_panel[0] ?? "");
+          setFallback(p.backtranslator_panel[1] ?? "");
+          // Deliberately not proposed. A reader is one or two calls; a control
+          // panel is five per model, and a pre-ticked panel is a spend nobody
+          // chose.
+          setAttestors([]);
+        } else {
+          // A *restored* instrument can be touched and still have gaps — pick
+          // a control panel for a dialect test, reload, switch to capability,
+          // and the reader and judge were never chosen at all. Filling only the
+          // empty slots keeps both halves of the rule: a chosen value is never
+          // overwritten, and a blank one is never left blank just because some
+          // other control was touched once.
+          //
+          // The fallback is not filled here. Empty is a real answer for it, and
+          // proposing one into a slot somebody deliberately cleared would be
+          // overwriting a choice that happens to look like a gap.
+          if (!judge) setJudge(p.judge ?? "");
+          if (!reader) setReader(p.backtranslator_panel[0] ?? "");
+        }
       }
     }).catch(() => {});
     return () => { live = false; };
@@ -142,7 +172,8 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
       const script = d.language?.script ?? null;
       const named = (d.family ?? []).filter(
         (f: any) => !f.inclusive && (!script || !f.script || f.script === script));
-      const other = named.find((f: any) => f.tag !== tag);
+      const other = named.find((f: any) => f.tag === contrastTag && f.tag !== tag)
+        ?? named.find((f: any) => f.tag !== tag);
       setVarieties(other ? [tag, other.tag] : [tag]);
     }).catch(() => setDetail(null));
   }, [tag, engine]);
@@ -331,7 +362,11 @@ export function SetupBar({ onStart, busy, disabled, locked }: {
                 locked={!!locked} width="w-72"
                 placeholder="search varieties…"
                 items={matchingSiblings} keyOf={(f: any) => f.tag}
-                onPick={(f: any) => { if (!locked) setVarieties([tag, f.tag]); }}
+                onPick={(f: any) => {
+                  if (locked) return;
+                  setVarieties([tag, f.tag]);
+                  setContrastTag(f.tag);
+                }}
                 render={(f: any) => (
                   <span className="flex items-baseline gap-2">
                     <span className="w-24 shrink-0 font-mono text-[12px] text-ink-soft">{f.tag}</span>

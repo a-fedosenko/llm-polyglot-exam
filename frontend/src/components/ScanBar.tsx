@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Proposal } from "../api";
+import { usePersisted } from "../persist";
 import type { CoverageRow, ModelRow, Rescan } from "../types";
 import { Combo, Field, ModelPick, Pick, Segment } from "./ui";
 
@@ -73,7 +74,10 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
   const [binding, setBinding] = useState(false);
   const [source, setSource] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
-  const [touched, setTouched] = useState(false);
+  // Persisted for the same reason the single-test bar's is: it is what stops
+  // the proposal from replacing a restored reader the moment the model list
+  // comes back, which would read as the page having forgotten.
+  const [touched, setTouched] = usePersisted("scan.touched", false);
   const [facetQuery, setFacetQuery] = useState("");
 
   const set = (patch: Partial<Instrument>) =>
@@ -90,13 +94,26 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
       if (!instrument.engine && r.models.length) set({ engine: r.models[0].id });
       // Same rule as the single-language page: a proposal replaces an untouched
       // instrument and never overwrites a chosen one.
-      if (r.propose && !touched) {
-        set({
-          engine: instrument.engine || r.models[0]?.id || "",
-          judge: r.propose.judge ?? "",
-          reader: r.propose.backtranslator_panel[0] ?? "",
-          fallback: r.propose.backtranslator_panel[1] ?? "",
-        });
+      if (r.propose) {
+        const p = r.propose;
+        const engine = instrument.engine || r.models[0]?.id || "";
+        if (!touched) {
+          set({
+            engine,
+            judge: p.judge ?? "",
+            reader: p.backtranslator_panel[0] ?? "",
+            fallback: p.backtranslator_panel[1] ?? "",
+          });
+        } else if (!instrument.judge || !instrument.reader) {
+          // Restored, touched, and still missing a half. Only the gaps are
+          // filled; the fallback is left alone because empty is a real answer
+          // for it.
+          set({
+            engine,
+            judge: instrument.judge || (p.judge ?? ""),
+            reader: instrument.reader || (p.backtranslator_panel[0] ?? ""),
+          });
+        }
       }
     }).catch(() => {});
     return () => { live = false; };

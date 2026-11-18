@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { usePersisted } from "../persist";
 import type { BatchPlan, BatchSnapshot, CoverageRow, Rescan } from "../types";
-import { FACET_LABEL, ScanBar, facetOf, type Instrument, type Scope }
+import { FACET_LABEL, ScanBar, facetOf, type Facet, type Instrument, type Scope }
   from "./ScanBar";
 import { Empty, Info, toneText } from "./ui";
 
@@ -34,11 +35,26 @@ export function CoveragePage({ onOpenRun }: { onOpenRun: (runId: string) => void
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [scope, setScope] = useState<Scope>({ facet: "all", value: "", query: "" });
-  const [instrument, setInstrument] = useState<Instrument>({
+  // Remembered across reloads, except the find box: a text filter restored
+  // invisibly is a table that looks wrong for a reason nothing on screen
+  // explains. The facet is the part worth keeping — "I am working through the
+  // Cyrillic ones" survives a refresh.
+  const [facet, setFacet] = usePersisted<{ facet: Facet; value: string }>(
+    "scan.scope", { facet: "all", value: "" });
+  const [query, setQuery] = useState("");
+  const scope: Scope = { ...facet, query };
+  const setScope = (next: Scope) => {
+    setFacet({ facet: next.facet, value: next.value });
+    setQuery(next.query);
+  };
+
+  const [instrument, setInstrument] = usePersisted<Instrument>("scan.instrument", {
     engine: "", judge: "", reader: "", fallback: "",
     rescan: "drafts" as Rescan, maxCalls: null,
   });
+  // Not remembered. A tick is a working selection rather than a setting, and a
+  // forgotten one restored on load would silently make the next scan narrower
+  // than the scope on screen.
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [plan, setPlan] = useState<BatchPlan | null>(null);
   const [batch, setBatch] = useState<BatchSnapshot | null>(null);

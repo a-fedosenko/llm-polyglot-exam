@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type Config } from "./api";
+import { usePersisted } from "./persist";
 import type { Call, RunSnapshot } from "./types";
 import { PromptEditor } from "./components/PromptEditor";
 import { SetupBar, type Setup } from "./components/SetupBar";
@@ -26,7 +27,9 @@ const OPEN_RUN = "polyglot.open-run";
 type Page = "test" | "coverage";
 
 export default function App() {
-  const [page, setPage] = useState<Page>("test");
+  // Which page you were on is remembered too: a reload in the middle of
+  // reading a coverage table should not land you back on the setup bar.
+  const [page, setPage] = usePersisted<Page>("page", "test");
   const [config, setConfig] = useState<Config | null>(null);
   const [run, setRun] = useState<RunSnapshot | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
