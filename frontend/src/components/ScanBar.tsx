@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, type Proposal } from "../api";
 import { usePersisted } from "../persist";
-import type { CoverageRow, ModelRow, Rescan } from "../types";
-import { Combo, Field, ModelPick, Pick, Segment } from "./ui";
+import type { CoverageRow, ModelRow, Rescan, TestType } from "../types";
+import { Combo, Field, ModelPick, Pick, Segment, Toggle } from "./ui";
+
+/** The panel is the dialect battery's whole instrument, and each member costs
+ *  three control calls plus two attestations on every item — so its size is a
+ *  budget decision as much as a methodological one. One is allowed and is
+ *  reported at low confidence, because one judge is one opinion. */
+const MIN_PANEL = 1;
+const MAX_PANEL = 3;
 
 /** How the list is cut down to the part you mean.
  *
@@ -21,9 +28,21 @@ export interface Scope {
 
 export interface Instrument {
   engine: string;
+  /** Which test the scan runs. The two walk different units — a capability
+   *  scan walks equivalence classes, a dialect battery walks varieties — and
+   *  they are measured through different instruments, which is why the band
+   *  below changes with it rather than offering both. */
+  test: TestType;
   judge: string;
   reader: string;
   fallback: string;
+  /** The dialect panel: one to three control models. */
+  attestors: string[];
+  /** Whether varieties whose family baseline nobody has confirmed are
+   *  scanned. Off by default — measuring hundreds of varieties against
+   *  baselines nobody has stood behind would turn an open question into a
+   *  table of claims. */
+  includeUnconfirmed: boolean;
   rescan: Rescan;
   maxCalls: number | null;
 }
@@ -44,6 +63,55 @@ export function facetOf(row: CoverageRow, facet: Facet): string | null {
   if (facet === "region") return row.region_name ?? row.region ?? null;
   if (facet === "letter") return (row.name ?? row.tag).slice(0, 1).toUpperCase();
   return null;
+}
+
+/** One entry of a facet menu: what it groups, what it is called, and every
+ *  spelling somebody might type looking for it.
+ *
+ *  The value stays the code, because the code is what groups the rows. What is
+ *  *shown* is the languages in it: `hbs` and `por` are the right keys and the
+ *  wrong thing to read, and a menu nobody can read without a lookup table is a
+ *  filter that silently returns the wrong set. The search string carries both
+ *  spellings of every member — `pt` and `por`, `sr` and `srp` — because which
+ *  one a person reaches for is not predictable. */
+export interface FacetEntry {
+  value: string;
+  label: string;
+  detail: string;
+  search: string;
+  n: number;
+}
+
+function facetEntries(rows: CoverageRow[], facet: Facet): FacetEntry[] {
+  const groups = new Map<string, CoverageRow[]>();
+  for (const r of rows) {
+    const v = facetOf(r, facet);
+    if (!v) continue;
+    (groups.get(v) ?? groups.set(v, []).get(v)!).push(r);
+  }
+  const out: FacetEntry[] = [];
+  for (const [value, members] of groups) {
+    if (facet !== "macro") {
+      out.push({ value, label: value, detail: "", search: value.toLowerCase(),
+                 n: members.length });
+      continue;
+    }
+    // A macrolanguage is a group of languages, so its name is its members'
+    // names — `hbs` is Bosnian, Croatian, Serbian and nothing shorter is true.
+    const names = [...new Set(members.map((m) => m.name).filter(Boolean))].sort();
+    const subtags = [...new Set(members.map((m) => m.tag.split("-")[0]))].sort();
+    const label = names.slice(0, 3).join(" · ")
+      + (names.length > 3 ? ` +${names.length - 3}` : "");
+    out.push({
+      value,
+      label: label || value,
+      detail: [value, ...subtags.filter((s) => s !== value)].join(" · "),
+      search: [value, ...subtags, ...names,
+               ...members.map((m) => m.iso639_3 ?? "")].join(" ").toLowerCase(),
+      n: members.length,
+    });
+  }
+  return out;
 }
 
 /** The whole configuration of a scan, in the order the decisions are made.
@@ -126,18 +194,14 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
 
   // Facet values, counted over the rows themselves. A menu entry whose count
   // came from anywhere but the list under it is a menu entry that can lie.
-  const counts = new Map<string, number>();
-  if (scope.facet !== "all") {
-    for (const r of rows) {
-      const v = facetOf(r, scope.facet);
-      if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
-    }
-  }
-  const values = [...counts.entries()]
+  const entries = scope.facet === "all" ? [] : facetEntries(rows, scope.facet);
+  const chosen = entries.find((e) => e.value === scope.value) ?? null;
+  const values = entries
     .sort((a, b) => (scope.facet === "letter"
-      ? a[0].localeCompare(b[0]) : b[1] - a[1] || a[0].localeCompare(b[0])))
-    .filter(([v]) => !facetQuery.trim()
-      || v.toLowerCase().includes(facetQuery.trim().toLowerCase()));
+      ? a.value.localeCompare(b.value)
+      : b.n - a.n || a.label.localeCompare(b.label)))
+    .filter((e) => !facetQuery.trim()
+      || e.search.includes(facetQuery.trim().toLowerCase()));
 
   const offeringHelp = proposal && (
     <>
@@ -176,15 +240,23 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
                  with the class's other tags inheriting the result, labelled as
                  inherited rather than measured.
                  <br /><br />
-                 <b>Dialect support</b> cannot be scanned yet, and the reason is
-                 not that it is unbuilt: a battery needs a <i>pair</i>, and which
-                 sibling each variety should be contrasted against is not
-                 derivable from a locale list. A family of 22 has 231 possible
-                 pairs. That information has to be recorded before a scan can
-                 walk it; stored dialect verdicts are still shown in the table.
+                 <b>Dialect support</b> walks <i>varieties</i>, because its
+                 claim is about one variety and nothing can inherit it. Each is
+                 held against its family's <b>reference variety</b> — the
+                 baseline recorded in{" "}
+                 <span className="font-mono">references/reference-varieties.json</span>,
+                 which is what turns a family of 26 from 325 pairs into 25
+                 contrasts and is also what makes two results in one family
+                 comparable, since they were measured against the same thing.
+                 <br /><br />
+                 A reference is a statement about what a measurement is{" "}
+                 <i>relative to</i>, never a claim about which variety is
+                 correct. The tags a battery cannot answer — the umbrella, the
+                 reference itself, a family with no defensible baseline — are
+                 named in the plan rather than quietly dropped.
                </>}>
-          <Segment value="capability" locked={!!locked} onChange={() => {}}
-                   unavailable={{ dialect: "A dialect scan needs a contrast pair per family — not derivable from the locale list, so it has to be recorded first." }}
+          <Segment value={instrument.test} locked={!!locked}
+                   onChange={(v) => set({ test: v as TestType })}
                    options={[["capability", "Language capability"],
                              ["dialect", "Dialect support"]]} />
         </Field>
@@ -216,15 +288,25 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
         {scope.facet !== "all" && (
           <Field label={FACET_LABEL[scope.facet]}>
             <Combo
-              value={scope.value ? `${scope.value} — ${counts.get(scope.value) ?? 0} tags` : ""}
+              value={chosen ? `${chosen.label} — ${chosen.n} tags` : ""}
               query={facetQuery} onQuery={setFacetQuery}
-              width="w-64" placeholder={`search ${FACET_LABEL[scope.facet].toLowerCase()}…`}
-              items={values} keyOf={([v]) => v}
-              onPick={([v]) => onScope({ ...scope, value: v })}
-              render={([v, n]) => (
+              width="w-72"
+              placeholder={scope.facet === "macro"
+                ? "name, pt or por…"
+                : `search ${FACET_LABEL[scope.facet].toLowerCase()}…`}
+              items={values} keyOf={(e) => e.value}
+              onPick={(e) => onScope({ ...scope, value: e.value })}
+              render={(e) => (
                 <span className="flex items-baseline justify-between gap-2">
-                  <span className="text-[13px] text-ink">{v}</span>
-                  <span className="text-[11px] text-ink-faint">{n}</span>
+                  <span className="min-w-0 text-[13px] text-ink">
+                    <span className="truncate">{e.label}</span>
+                    {e.detail && (
+                      <span className="ml-1.5 font-mono text-[10.5px] text-ink-faint">
+                        {e.detail}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[11px] text-ink-faint">{e.n}</span>
                 </span>
               )}
             />
@@ -238,10 +320,81 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
         </Field>
       </div>
 
-      {/* Who measures it. The same three selects as the single-language page,
-          because they are the same three questions. */}
+      {/* Who measures it. The same selects as the single-language page, because
+          they are the same questions — and which questions they are depends on
+          the test: a capability ladder is graded by a judge reading a
+          back-translation, and a dialect battery has no judge at all. Its
+          instrument is a panel of control models, re-qualified by manufactured
+          controls on every single item. */}
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3 border-t
                       border-line-soft px-4 py-2.5">
+        {instrument.test === "dialect" ? (
+          <>
+            <Field label={`Controls ${instrument.attestors.length}/${MAX_PANEL}`} wide
+                   info={<>
+                     The models that judge the dialect, blind. Unlike a reader
+                     chain, <b>every one of these answers</b> — they are a
+                     panel, not a fallback — and each costs three control calls
+                     plus two attestations <i>per variety</i>, which on a scan
+                     is the number to think about before the ceiling.
+                     <br /><br />
+                     Every one is re-qualified on every item by controls whose
+                     answers are certain by construction: one text shown as both
+                     halves of a pair, and one real pair shown in both orders. A
+                     stored record routes — it decides who is asked first — and
+                     it never vouches.
+                     {offeringHelp && <><br /><br />{offeringHelp}</>}
+                   </>}>
+              <div className="flex min-h-[30px] flex-wrap items-center gap-1">
+                {eligible.map((m) => {
+                  const on = instrument.attestors.includes(m.id);
+                  const full = !on && instrument.attestors.length >= MAX_PANEL;
+                  return (
+                    <Toggle key={m.id} on={on} label={m.id} dim={full}
+                            onClick={() => choose(() => set({
+                              attestors: on
+                                ? instrument.attestors.filter((a) => a !== m.id)
+                                : full ? instrument.attestors
+                                       : [...instrument.attestors, m.id],
+                            }))} />
+                  );
+                })}
+                {!instrument.attestors.length && (
+                  <span className="ml-1 text-[11px] text-warn">
+                    none selected — pick {MIN_PANEL}–{MAX_PANEL}
+                  </span>
+                )}
+              </div>
+            </Field>
+
+            <Field label="Unconfirmed baselines" wide
+                   info={<>
+                     Every contrastable family is written down in{" "}
+                     <span className="font-mono">references/reference-varieties.json</span>{" "}
+                     with the variety it is held against and the reason — the
+                     ones a rule could derive included, so the open questions
+                     are countable in one place.
+                     <br /><br />
+                     A family is <b>confirmed</b> when somebody set{" "}
+                     <span className="font-mono">reviewed: true</span> on it.
+                     Until then the entry is a <b>proposal</b>: a written claim
+                     with a reason and nobody behind it, which is not the same
+                     as a decision.
+                     <br /><br />
+                     Scanning those is runnable and it is not nothing — every
+                     verdict is relative to a baseline no one has stood behind.
+                     Left out by default, counted in the plan either way, and
+                     the varieties affected are named rather than tallied.
+                   </>}>
+              <Segment value={instrument.includeUnconfirmed ? "yes" : "no"}
+                       locked={!!locked}
+                       onChange={(v) => set({ includeUnconfirmed: v === "yes" })}
+                       options={[["no", "Confirmed baselines only"],
+                                 ["yes", "Include unconfirmed"]]} />
+            </Field>
+          </>
+        ) : (
+          <>
         <Field label="Reader"
                info="Translates each generation back into the pivot language so the judge can grade it without reading the target language. Qualified per language before it is trusted, on every item — the cache routes, it never vouches.">
           <Pick models={eligible} binding={binding} value={instrument.reader}
@@ -286,6 +439,8 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
             )}
           </div>
         </Field>
+          </>
+        )}
       </div>
 
       {/* How far it may go, and go. */}

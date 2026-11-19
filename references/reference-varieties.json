@@ -2,77 +2,548 @@
   "_about": {
     "what": "The reference variety of each family: the one every other variety in its equivalence class is contrasted against. Turns an N×N dialect problem into N−1 pairs — Arabic's 26 regional tags are 325 pairs and 25 contrasts — and it is what makes two results in one family comparable, because they were measured against the same baseline.",
     "not-a-ranking": "It is the contrast baseline, not the correct, best or standard variety. Nothing here is a claim about prestige or priority; it is a statement about what a measurement is relative to. The file is read by people whose own variety is on the other side of it.",
+    "complete-on-purpose": "EVERY contrastable family in the shipped locale list has an entry, including the ones a rule could derive (pt/PT, ru/RU, es/ES). Deriving them meant the file showed only exceptions, so the families nobody had thought about were invisible — and the first member of the class quietly stood in for a decision. One file, one entry per family, is what makes the open questions countable and the settled ones arguable.",
     "keyed-by": "Equivalence class `iso639-3|script`. A reference is a statement about regions *within* one writing system — Serbian needs one per alphabet, and a contrast that crossed that line would measure the script rather than the variety.",
-    "keyed-on-region": "Entries name a REGION, not a tag, because a region code is the same fact in every locale list while tag spellings are not (`sr-rs-latn` here, `sr-Latn-RS` elsewhere). Seven classes hold two language subtags in one region — `ak-gh` and `tw-gh` — and those name an explicit `tag` instead.",
-    "not-per-scheme": "One file for every locale list. Which variety baselines a family does not change when you load a different list; only the spelling of the tag does, which is exactly what keying on the region avoids.",
-    "derivation": "Most families need no entry. Where the language subtag equals the region subtag — pt/PT, ru/RU, es/ES, de/DE, fr/FR, it/IT, nl/NL, ro/RO, tr/TR — the reference is derived in `core/reference.py` and nothing is recorded here. This file holds the families where that rule cannot fire, and the exceptions where it fires on the wrong member.",
-    "status": "A reference is a CLAIM and some of these are arguable. Every entry carries `reviewed: false` until a person who works in that family has looked at it.",
-    "three-states": "A region or tag means decided. `null` means decided that this family has no defensible reference. Absent means not decided yet — a gap, counted as one by `/api/reference`, and never silently treated as `null`."
+    "the-baseline": "`baseline` is the tag every other variety in the family is contrasted against, written in the conventional BCP-47 form — `en-US`, `sr-Cyrl-RS` — whatever the loaded locale list happens to spell it. It is resolved by what the tag means — primary subtag, region, script — rather than by how it is spelled, so one file serves a list that writes `sr-Latn-RS` and one that writes `sr-rs-latn`. A baseline naming a variety the loaded list does not carry is reported by `polyglot references --check` and never silently substituted.",
+    "not-per-scheme": "One file for every locale list. Which variety baselines a family does not change when you load a different list; only the spelling of the tag does, which is what the lenient resolution above is for. A family this file does not cover still runs: `core/reference.py` falls back to the subtag rule and then to the first member, both labelled as what they are.",
+    "four-states": [
+      "`reviewed: true`   — recorded. A person stood behind this baseline; it is what a scan uses.",
+      "`reviewed: false`  — proposed. Written down with a reason, nobody has confirmed it. A scan leaves these out unless asked for them explicitly, because a verdict measured against an unconfirmed baseline is a claim nobody made.",
+      "`baseline: null`   — decided that this family has no defensible baseline. A finished decision, not a gap.",
+      "absent            — a family this file does not cover. Should not happen for the shipped list; `polyglot references --check` is what says so."
+    ],
+    "how-to-confirm": "Read the `why`, change the `region` if it is wrong, and set `reviewed` to true. That is the whole workflow, and it is deliberately a file rather than a screen: a baseline is an argument, and an argument belongs in review with a diff.",
+    "human-readable-half": "`language`, `script` and `baseline_title` are a reading aid, not data: the resolver uses `baseline`, `why` and `reviewed` and nothing else. `polyglot references --annotate` refreshes them from the loaded list, and `--check` reports any that have gone stale."
   },
 
-  "eng|Latn": {
-    "region": "US",
-    "why": "The rule cannot fire — there is no `en-EN`. US over GB: it is what CLDR likelySubtags resolves bare `en` to, and `markers/english.json` already expresses every sibling against the American forms, so a different choice here would contradict the marker sets.",
-    "reviewed": true
+  "aar|Latn": {
+    "language": "Afar",
+    "script": "Latn",
+    "baseline": "aa-ET",
+    "baseline_title": "Afar (Ethiopia)",
+    "why": "Most Afar speakers live in Ethiopia's Afar Region, where the Latin orthography is taught; Djibouti and Eritrea are the contrast arms. Alphabetical order had put Djibouti here.",
+    "reviewed": false
+  },
+
+  "afr|Latn": {
+    "language": "Afrikaans",
+    "script": "Latn",
+    "baseline": "af-ZA",
+    "baseline_title": "Afrikaans (South Africa)",
+    "why": "Afrikaans is codified in South Africa; Namibian Afrikaans is the contrast arm. Alphabetical order had put Namibia here.",
+    "reviewed": false
+  },
+
+  "aka|Latn": {
+    "language": "Akan",
+    "script": "Latn",
+    "baseline": "ak-GH",
+    "baseline_title": "Akan (Ghana)",
+    "why": "Two language subtags share Ghana (`ak`, `tw`), so a region cannot name one row. Akan proper baselines the class and Twi is the contrast arm — which is the arguable half of this entry, since Twi is the larger written variety.",
+    "reviewed": false
   },
 
   "ara|Arab": {
-    "region": "SA",
+    "language": "Arabic",
+    "script": "Arab",
+    "baseline": "ar-SA",
+    "baseline_title": "Arabic (Saudi Arabia)",
     "why": "Operator decision. The alternative baseline is Modern Standard Arabic, which is not a region and so cannot be a member of this class; SA is the closest regional standard to it.",
     "reviewed": true
   },
 
-  "zho|Hans": {
-    "region": "CN",
-    "why": "Simplified Chinese. The class also holds a regionless `zh-hans`, which is a script label rather than a variety anything can be contrasted against.",
+  "aym|Latn": {
+    "language": "Aymara",
+    "script": "Latn",
+    "baseline": "ay-BO",
+    "baseline_title": "Aymara (Bolivia)",
+    "why": "`ay` and `ayr` both carry BO. Bolivia holds most Aymara speakers and the orthography in official use; the macrolanguage row baselines the class rather than Central Aymara (`ayr`).",
+    "reviewed": false
+  },
+
+  "aze|Latn": {
+    "language": "Azerbaijani",
+    "script": "Latn",
+    "baseline": "az-Latn-AZ",
+    "baseline_title": "North Azerbaijani (Azerbaijan)",
+    "why": "North Azerbaijani as written in Azerbaijan. Named as a tag rather than a region because the class also files `az-AZ-Cyrl`, and a Cyrillic baseline would make every contrast in it measure the alphabet.",
     "reviewed": true
   },
 
-  "zho|Hant": {
-    "region": "TW",
-    "why": "Traditional Chinese. TW over HK: Hong Kong written Chinese carries Cantonese lexis, a second dimension of difference that would make every contrast against it measure two things at once.",
+  "ben|Beng": {
+    "language": "Bengali",
+    "script": "Beng",
+    "baseline": "bn-BD",
+    "baseline_title": "Bengali (Bangladesh)",
+    "why": "Standard literary Bengali is shared across the border, so this is a population call rather than a linguistic one: Bangladesh has roughly twice West Bengal's speakers. `bn-IN` is the defensible alternative and the reason this is not marked reviewed.",
+    "reviewed": false
+  },
+
+  "bod|Tibt": {
+    "language": "Tibetan",
+    "script": "Tibt",
+    "baseline": "bo-CN",
+    "baseline_title": "Lhasa Tibetan (China)",
+    "why": "Lhasa Tibetan is the written standard; the exile variety in India is the contrast arm.",
+    "reviewed": false
+  },
+
+  "cat|Latn": {
+    "language": "Catalan",
+    "script": "Latn",
+    "baseline": "ca-ES",
+    "baseline_title": "Catalan (Spain)",
+    "why": "The rule cannot fire — Catalan is `ca` and Spain is `ES`, and `CA` is Canada. Without an entry the first member stood in, which is `ca-AD`: Andorran Catalan is Central Catalan with a different passport, so contrasting `ca-ES` against it would measure nothing, and Roussillonnais (FR) and Alguèrs (IT) would be held against the smallest Catalan-speaking polity rather than the one the written standard is codified in.",
+    "reviewed": false
+  },
+
+  "dan|Latn": {
+    "language": "Danish",
+    "script": "Latn",
+    "baseline": "da-DK",
+    "baseline_title": "Danish (Denmark)",
+    "why": "The rule cannot fire: Danish is `da` and Denmark is `DK`. Greenlandic Danish is the contrast arm.",
     "reviewed": true
+  },
+
+  "deu|Latn": {
+    "language": "German",
+    "script": "Latn",
+    "baseline": "de-DE",
+    "baseline_title": "German (Germany)",
+    "why": "The language subtag equals the region subtag (de/DE), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "ell|Grek": {
+    "language": "Greek",
+    "script": "Grek",
+    "baseline": "el-GR",
+    "baseline_title": "Greek (Greece)",
+    "why": "The rule cannot fire: Greek is `el` and Greece is `GR`. Cypriot Greek is the contrast arm.",
+    "reviewed": true
+  },
+
+  "eng|Latn": {
+    "language": "English",
+    "script": "Latn",
+    "baseline": "en-US",
+    "baseline_title": "English (United States)",
+    "why": "The rule cannot fire — there is no `en-EN`. US over GB: it is what CLDR likelySubtags resolves bare `en` to, and `markers/english.json` already expresses every sibling against the American forms, so a different choice here would contradict the marker sets.",
+    "reviewed": true
+  },
+
+  "ewe|Latn": {
+    "language": "Ewe",
+    "script": "Latn",
+    "baseline": "ee-GH",
+    "baseline_title": "Ewe (Ghana)",
+    "why": "The standard Ewe orthography is the Ghanaian one and the Volta Region holds most speakers; Togo is the contrast arm.",
+    "reviewed": false
+  },
+
+  "fas|Arab": {
+    "language": "Persian",
+    "script": "Arab",
+    "baseline": "fa-IR",
+    "baseline_title": "Persian (Iran)",
+    "why": "The rule cannot fire: Persian is `fa` and Iran is `IR`. Dari (`fa-AF`) is the contrast arm.",
+    "reviewed": true
+  },
+
+  "fra|Latn": {
+    "language": "French",
+    "script": "Latn",
+    "baseline": "fr-FR",
+    "baseline_title": "French (France)",
+    "why": "The language subtag equals the region subtag (fr/FR), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "gla|Latn": {
+    "language": "Scottish Gaelic",
+    "script": "Latn",
+    "baseline": "gd-GB",
+    "baseline_title": "Scottish Gaelic (United Kingdom)",
+    "why": "Scottish Gaelic is codified in Scotland. Alphabetical order had put Canadian Gaelic — a few thousand speakers in Nova Scotia — here.",
+    "reviewed": false
+  },
+
+  "gsw|Latn": {
+    "language": "Alsatian",
+    "script": "Latn",
+    "baseline": "gsw-CH",
+    "baseline_title": "Alsatian (Switzerland)",
+    "why": "Swiss German is the bulk of this class; Alsatian (FR) and Liechtenstein are the contrast arms. The list's own name for the class is Alsatian, which is worth settling before this is confirmed.",
+    "reviewed": false
+  },
+
+  "hau|Latn": {
+    "language": "Hausa",
+    "script": "Latn",
+    "baseline": "ha-NG",
+    "baseline_title": "Hausa (Nigeria)",
+    "why": "Kano Hausa is the written standard and Nigeria holds most speakers; Niger and Ghana are the contrast arms. Alphabetical order had put Ghana here.",
+    "reviewed": false
+  },
+
+  "ita|Latn": {
+    "language": "Italian",
+    "script": "Latn",
+    "baseline": "it-IT",
+    "baseline_title": "Italian (Italy)",
+    "why": "The language subtag equals the region subtag (it/IT), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "kon|Latn": {
+    "language": "Kikongo",
+    "script": "Latn",
+    "baseline": "kg-AO",
+    "baseline_title": "Kongo (Angola)",
+    "why": "`kg` and `kon` both carry AO, so a region cannot name one row. Which of the two the list means by each is unclear, and this entry should not be confirmed until that is.",
+    "reviewed": false
+  },
+
+  "kur|Arab": {
+    "language": "Kurdish",
+    "script": "Arab",
+    "baseline": "ku-IQ",
+    "baseline_title": "Kurdish (Iraq)",
+    "why": "In Arabic script the written standard is Sorani as used in Iraqi Kurdistan; Iran is the contrast arm. Kurmanji is written in Latin and is a different class.",
+    "reviewed": false
+  },
+
+  "lav|Latn": {
+    "language": "Latvian",
+    "script": "Latn",
+    "baseline": "lav-LV",
+    "baseline_title": "Latvian (Latvia)",
+    "why": "`lav` and `lvs` both carry LV, so a region cannot name one row. The macrolanguage row baselines the class; Standard Latvian (`lvs`) is the same variety under a narrower code, which makes this pair a poor contrast and worth questioning as a family at all.",
+    "reviewed": false
+  },
+
+  "lin|Latn": {
+    "language": "Lingala",
+    "script": "Latn",
+    "baseline": "ln-CD",
+    "baseline_title": "Lingala (Congo (DRC))",
+    "why": "Kinshasa Lingala is the variety with institutional weight and the largest speaker base; Congo-Brazzaville, Angola and CAR are the contrast arms. Alphabetical order had put Angola here.",
+    "reviewed": false
+  },
+
+  "lrc|Arab": {
+    "language": "Luri",
+    "script": "Arab",
+    "baseline": "lrc-IR",
+    "baseline_title": "Northern Luri (Iran)",
+    "why": "Northern Luri is spoken overwhelmingly in Iran; the Iraqi row is the contrast arm. Alphabetical order had put Iraq here.",
+    "reviewed": false
+  },
+
+  "mas|Latn": {
+    "language": "Masai",
+    "script": "Latn",
+    "baseline": "mas-KE",
+    "baseline_title": "Masai (Kenya)",
+    "why": "Maasai spans the Kenya–Tanzania border with no codified standard on either side; Kenya is proposed on speaker numbers alone.",
+    "reviewed": false
+  },
+
+  "mon|Cyrl": {
+    "language": "Mongolian",
+    "script": "Cyrl",
+    "baseline": "mn-MN",
+    "baseline_title": "Mongolian (Mongolia)",
+    "why": "The subtag rule fires (mn/MN), but `khk-mn` shares the region, so the region alone cannot name the row. Khalkha is the standard either way; the macrolanguage row baselines the class.",
+    "reviewed": true
+  },
+
+  "msa|Latn": {
+    "language": "Malay",
+    "script": "Latn",
+    "baseline": "ms-MY",
+    "baseline_title": "Malay (Malaysia)",
+    "why": "`ms` and `zsm` both carry MY, so a region cannot name one row. Malaysia's Bahasa Melayu baselines the class; Brunei and Singapore are the contrast arms. Alphabetical order had put Brunei here.",
+    "reviewed": false
+  },
+
+  "nep|Deva": {
+    "language": "Nepali",
+    "script": "Deva",
+    "baseline": "ne-NP",
+    "baseline_title": "Nepali (Nepal)",
+    "why": "Nepali is codified in Nepal; the Indian row (Sikkim, Darjeeling) is the contrast arm. Alphabetical order had put India here.",
+    "reviewed": false
+  },
+
+  "nld|Latn": {
+    "language": "Dutch",
+    "script": "Latn",
+    "baseline": "nl-NL",
+    "baseline_title": "Dutch (Netherlands)",
+    "why": "The language subtag equals the region subtag (nl/NL), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "orm|Latn": {
+    "language": "Oromo",
+    "script": "Latn",
+    "baseline": "om-ET",
+    "baseline_title": "Oromo (Ethiopia)",
+    "why": "`gaz` and `om` both carry ET, so a region cannot name one row. Ethiopia holds the Oromo standard and the Qubee orthography; Kenya is the contrast arm. Whether the macrolanguage row or West Central Oromo (`gaz`) should baseline it is the open half.",
+    "reviewed": false
+  },
+
+  "oss|Cyrl": {
+    "language": "Ossetian",
+    "script": "Cyrl",
+    "baseline": "os-RU",
+    "baseline_title": "Ossetian (Russia)",
+    "why": "North Ossetia holds the Iron standard and most speakers; South Ossetia/Georgia is the contrast arm.",
+    "reviewed": false
+  },
+
+  "por|Latn": {
+    "language": "Portuguese",
+    "script": "Latn",
+    "baseline": "pt-PT",
+    "baseline_title": "Portuguese (Portugal)",
+    "why": "The language subtag equals the region subtag (pt/PT), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "pus|Arab": {
+    "language": "Pashto",
+    "script": "Arab",
+    "baseline": "ps-AF",
+    "baseline_title": "Southern Pashto (Afghanistan)",
+    "why": "Pashto is an official language of Afghanistan and standardised there; the Pakistani row is the contrast arm.",
+    "reviewed": false
+  },
+
+  "que|Latn": {
+    "language": "Quechua",
+    "script": "Latn",
+    "baseline": "quz-BO",
+    "baseline_title": "Quechua (Bolivia)",
+    "why": "PROPOSED UNDER PROTEST: the list files Cusco Quechua (`quz`) under Bolivia and Ecuador and carries no Peruvian row, which looks like a defect in the locale list — Cusco is in Peru. Bolivia stands in so the family is not left headless; this should be resolved in the list rather than confirmed here.",
+    "reviewed": false
+  },
+
+  "ron|Latn": {
+    "language": "Romanian",
+    "script": "Latn",
+    "baseline": "ro-RO",
+    "baseline_title": "Romanian (Romania)",
+    "why": "The language subtag equals the region subtag (ro/RO), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "rus|Cyrl": {
+    "language": "Russian",
+    "script": "Cyrl",
+    "baseline": "ru-RU",
+    "baseline_title": "Russian (Russia)",
+    "why": "The language subtag equals the region subtag (ru/RU), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "sma|Latn": {
+    "language": "Sami Southern",
+    "script": "Latn",
+    "baseline": "sma-NO",
+    "baseline_title": "Sami Southern (Norway)",
+    "why": "Southern Sami straddles Norway and Sweden with orthographies on both sides. Norway is proposed on speaker numbers; this is close enough to be worth a second opinion.",
+    "reviewed": false
+  },
+
+  "sme|Latn": {
+    "language": "Northern Sami",
+    "script": "Latn",
+    "baseline": "se-SE",
+    "baseline_title": "Northern Sami (Sweden)",
+    "why": "Northern Sami: the subtag rule fires (se/SE). Norway holds more speakers, so this is the one rule-derived baseline worth re-reading — left as the rule has it until somebody who works in the family says otherwise.",
+    "reviewed": true
+  },
+
+  "smj|Latn": {
+    "language": "Sami Lule",
+    "script": "Latn",
+    "baseline": "smj-SE",
+    "baseline_title": "Sami Lule (Sweden)",
+    "why": "Lule Sami is centred on Jokkmokk in Sweden, where the orthography was codified; Norway is the contrast arm. Alphabetical order had put Norway here.",
+    "reviewed": false
+  },
+
+  "som|Latn": {
+    "language": "Somali",
+    "script": "Latn",
+    "baseline": "so-SO",
+    "baseline_title": "Somali (Somalia)",
+    "why": "The language subtag equals the region subtag (so/SO), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "sot|Latn": {
+    "language": "Sotho",
+    "script": "Latn",
+    "baseline": "st-LS",
+    "baseline_title": "Southern Sotho (Lesotho)",
+    "why": "Sesotho is codified in Lesotho, where it is the sole national language; South African Sesotho is the contrast arm and uses a different orthography, which is exactly what makes this pair worth measuring.",
+    "reviewed": false
+  },
+
+  "spa|Latn": {
+    "language": "Spanish",
+    "script": "Latn",
+    "baseline": "es-ES",
+    "baseline_title": "Spanish (Spain)",
+    "why": "The language subtag equals the region subtag (es/ES), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
+    "reviewed": true
+  },
+
+  "sqi|Latn": {
+    "language": "Albanian",
+    "script": "Latn",
+    "baseline": "sq-AL",
+    "baseline_title": "Albanian (Albania)",
+    "why": "Standard Albanian is codified in Albania on the Tosk base; North Macedonia and Kosovo are the contrast arms.",
+    "reviewed": false
   },
 
   "srp|Cyrl": {
-    "region": "RS",
+    "language": "Serbian",
+    "script": "Cyrl",
+    "baseline": "sr-Cyrl-RS",
+    "baseline_title": "Serbian (Serbia)",
     "why": "The rule cannot fire: Serbian is `sr` and Serbia is `RS`. Serbia baselines both Serbian classes; Montenegro, Bosnia and Kosovo are the varieties contrasted against it.",
     "reviewed": true
   },
 
   "srp|Latn": {
-    "region": "RS",
+    "language": "Serbian",
+    "script": "Latn",
+    "baseline": "sr-Latn-RS",
+    "baseline_title": "Serbian (Serbia)",
     "why": "As `srp|Cyrl`, in the other alphabet. A reference never crosses a script class.",
     "reviewed": true
   },
 
+  "ssw|Latn": {
+    "language": "Swati",
+    "script": "Latn",
+    "baseline": "ss-SZ",
+    "baseline_title": "siSwati (Eswatini)",
+    "why": "siSwati is the national language of Eswatini; the South African row is the contrast arm.",
+    "reviewed": false
+  },
+
+  "swa|Latn": {
+    "language": "Swahili",
+    "script": "Latn",
+    "baseline": "sw-TZ",
+    "baseline_title": "Swahili (Tanzania)",
+    "why": "Standard Swahili is codified on the Kiunguja (Zanzibar) base and Tanzania is where it is an official national language; Kenya, Uganda and DR Congo are the contrast arms. Alphabetical order had put DR Congo here.",
+    "reviewed": false
+  },
+
   "swe|Latn": {
-    "region": "SE",
+    "language": "Swedish",
+    "script": "Latn",
+    "baseline": "sv-SE",
+    "baseline_title": "Swedish (Sweden)",
     "why": "The rule cannot fire: Swedish is `sv` and Sweden is `SE`. Finland and Åland Swedish are the varieties under contrast.",
     "reviewed": true
   },
 
-  "dan|Latn": {
-    "region": "DK",
-    "why": "The rule cannot fire: Danish is `da` and Denmark is `DK`.",
+  "tam|Taml": {
+    "language": "Tamil",
+    "script": "Taml",
+    "baseline": "ta-IN",
+    "baseline_title": "Tamil (India)",
+    "why": "Tamil Nadu holds the written standard; Sri Lanka, Singapore and Malaysia are the contrast arms — Sri Lankan Tamil being the one with real lexical distance from it.",
+    "reviewed": false
+  },
+
+  "teo|Latn": {
+    "language": "Teso",
+    "script": "Latn",
+    "baseline": "teo-UG",
+    "baseline_title": "Teso (Uganda)",
+    "why": "Most Iteso live in Uganda; the Kenyan row is the contrast arm. Alphabetical order had put Kenya here.",
+    "reviewed": false
+  },
+
+  "tir|Ethi": {
+    "language": "Tigrinya",
+    "script": "Ethi",
+    "baseline": "ti-ER",
+    "baseline_title": "Tigrinya (Eritrea)",
+    "why": "Tigrinya is an official language of Eritrea and the Asmara press standardised much of the written form, but Tigray holds more speakers — a genuine split, and the reason this is proposed rather than confirmed.",
+    "reviewed": false
+  },
+
+  "tur|Latn": {
+    "language": "Turkish",
+    "script": "Latn",
+    "baseline": "tr-TR",
+    "baseline_title": "Turkish (Turkey)",
+    "why": "The language subtag equals the region subtag (tr/TR), which is this project's uniform rule for a baseline. Written down rather than derived, so the family is visible here beside the ones that needed an argument.",
     "reviewed": true
   },
 
-  "ell|Grek": {
-    "region": "GR",
-    "why": "The rule cannot fire: Greek is `el` and Greece is `GR`. Cypriot Greek is the variety under contrast.",
+  "tzm|Latn": {
+    "language": "Tamazight",
+    "script": "Latn",
+    "baseline": "tzm-Latn-MA",
+    "baseline_title": "Central Atlas Tamazight (Morocco)",
+    "why": "Standard Moroccan Tamazight is the codified variety in Latin script; the Algerian row is the contrast arm. Alphabetical order had put Algeria here.",
+    "reviewed": false
+  },
+
+  "urd|Arab": {
+    "language": "Urdu",
+    "script": "Arab",
+    "baseline": "ur-PK",
+    "baseline_title": "Urdu (Pakistan)",
+    "why": "Urdu is the national language of Pakistan and standardised there; the Indian row is the contrast arm. Alphabetical order had put India here.",
+    "reviewed": false
+  },
+
+  "yor|Latn": {
+    "language": "Yoruba",
+    "script": "Latn",
+    "baseline": "yo-NG",
+    "baseline_title": "Yoruba (Nigeria)",
+    "why": "Standard Yoruba is codified in Nigeria, which holds the overwhelming majority of speakers; Benin is the contrast arm. Alphabetical order had put Benin here.",
+    "reviewed": false
+  },
+
+  "zho|Hans": {
+    "language": "Chinese",
+    "script": "Hans",
+    "baseline": "zh-CN",
+    "baseline_title": "Chinese (China)",
+    "why": "Simplified Chinese. The class also holds a regionless `zh-hans`, which is a script label rather than a variety anything can be contrasted against.",
     "reviewed": true
   },
 
-  "fas|Arab": {
-    "region": "IR",
-    "why": "The rule cannot fire: Persian is `fa` and Iran is `IR`. Dari is the variety under contrast.",
+  "zho|Hant": {
+    "language": "Chinese",
+    "script": "Hant",
+    "baseline": "zh-TW",
+    "baseline_title": "Chinese (Taiwan)",
+    "why": "Traditional Chinese. TW over HK: Hong Kong written Chinese carries Cantonese lexis, a second dimension of difference that would make every contrast against it measure two things at once.",
     "reviewed": true
   },
 
-  "aze|Latn": {
-    "tag": "az-az-latn",
-    "why": "A tag rather than a region, and an exception to the rule. `az` equals `AZ`, but this class holds both `az-AZ-Latn` and `az-AZ-Cyrl` — a Cyrillic tag filed under a Latin class, which is a defect in the loaded locale list. Region `AZ` would therefore match two members, and the rule would pick the Cyrillic one, making every contrast in the family measure the alphabet.",
-    "reviewed": true
+  "zh|Hans": {
+    "language": "Chinese",
+    "script": "Hans",
+    "baseline": null,
+    "baseline_title": null,
+    "why": "NO REFERENCE, AND NOT A FAMILY: this class exists only because `zh-mo-hans` and `zh-sg` carry the class key `zh|Hans` while every other Simplified row carries `zho|Hans`. There is no Chinese family here to baseline — the two rows belong in `zho|Hans` with `zh-CN`. Fix the locale list; this entry exists so the defect is visible rather than measured.",
+    "reviewed": false
   }
 }

@@ -202,9 +202,10 @@ def language(tag: str, engine: str | None = None, scheme: str | None = None) -> 
                     "inclusive": l.inclusive} for l in family],
         "umbrella": next((l.tag for l in family if l.inclusive), None),
         #: What a dialect battery contrasts this tag against by default, and
-        #: on what basis. `provisional` means nobody has decided this family's
-        #: reference and the first member is standing in — the page says so
-        #: rather than presenting a placeholder as a decision.
+        #: on what basis. `proposed` means the file carries a reference and a
+        #: reason that nobody has confirmed; `provisional` means it carries
+        #: nothing and list order is standing in. The page says which rather
+        #: than presenting either as a decision.
         "reference": reference_mod.reference_of(sch, lang).as_dict(),
         "known": known,
         "specs": [s.model_dump() for s in load_specs()],
@@ -499,6 +500,10 @@ def _verdict_dict(r) -> dict:
             "pivot": r.pivot, "attestors": r.attestors,
             "detail": r.detail, "notes": r.notes,
             "inherited_from": r.inherited_from,
+            #: Present only on a re-scored row: the corrections a person made
+            #: to the judge or the panel. A reader is never shown an adjudicated
+            #: answer as if a model had produced it.
+            "adjudicated": r.adjudicated,
             "current": r.current, "approved": r.approved,
             "method_version": r.method_version,
             "measured_at": r.measured_at.isoformat() if r.measured_at else None}
@@ -552,12 +557,17 @@ def promote(verdict_id: int) -> dict:
 
 @app.get("/api/reference")
 def reference(scheme: str | None = None) -> dict:
-    """Which variety each family is contrasted against, and how much is decided.
+    """Which variety each family is contrasted against, and how much is settled.
 
-    The provisional list is the work queue: those families have a reference only
-    because something had to be first, and a measurement taken against a
-    placeholder is comparable to other measurements against the same
-    placeholder and to nothing else.
+    `unconfirmed` is the work queue: every family in the shipped list is
+    written down in `references/reference-varieties.json` with a reason, and
+    these are the ones nobody has stood behind yet — a measurement taken
+    against an unconfirmed baseline is comparable to other measurements against
+    the same baseline and to nothing else.
+
+    `unlisted` is the harder failure: a family the file does not cover at all,
+    where list order is standing in. Empty for the shipped list, and not
+    necessarily for somebody else's.
     """
     sch = load_scheme(scheme or settings.scheme)
     cov = reference_mod.coverage(sch)
@@ -597,14 +607,21 @@ def coverage(engine: str, test_type: str = "capability",
     out = []
     for lang in sch.languages.values():
         v = by_tag.get(lang.tag)
-        out.append({
+        row = {
             "tag": lang.tag, "name": lang.name, "local_name": lang.local_name,
             "script": lang.script, "region": lang.region,
             "region_name": lang.region_name, "macro": lang.macro,
             "iso639_3": lang.iso639_3, "inclusive": lang.inclusive,
             "cls": lang.cls, "class_size": classes.get(lang.cls, 1),
             "verdict": v,
-        })
+        }
+        if test_type == "dialect":
+            # What a battery would hold this tag against, or why it would
+            # refuse. The same call the scan plan makes, so the rows on screen
+            # and the scan set cannot disagree about which tags are testable —
+            # the rule this page already follows for its facet counts.
+            row["pairing"] = reference_mod.pairing(sch, lang).as_dict()
+        out.append(row)
     out.sort(key=lambda r: r["tag"])
     return {"engine": engine, "test_type": test_type, "scheme": sch.meta.name,
             "method_version": METHOD_VERSION, "rows": out}
@@ -620,9 +637,22 @@ class ScanBody(BaseModel):
     #: distinguishes may be measured again. See `engine.batch.RESCAN`.
     rescan: str = "drafts"
     scheme_name: str | None = None
+    #: The capability instrument. A dialect battery has neither: its instrument
+    #: is the panel below, re-qualified by manufactured controls on every run.
     judge_model: str | None = None
     backtranslator_panel: list[str] | None = None
     pivot: str | None = None
+    #: The dialect instrument. One to three control models, and the scenario the
+    #: varieties are written from — what a contrast can find is bounded by what
+    #: the text gives the two varieties to disagree about.
+    attestors: list[str] | None = None
+    scenario: str | None = None
+    #: Whether varieties whose family baseline nobody has confirmed are
+    #: scanned. Off by default: `references/reference-varieties.json` carries a
+    #: proposal and a reason for every family, and until a person sets
+    #: `reviewed: true` on one, measuring against it in bulk would turn an open
+    #: question into a table of claims.
+    include_unconfirmed: bool = False
     max_calls: int | None = None
 
 
@@ -633,6 +663,8 @@ def batch_preflight(body: ScanBody) -> dict:
         return batch.preflight(
             engine=body.engine, tags=body.tags, test_type=body.test_type,
             rescan=body.rescan, scheme_name=body.scheme_name,
+            attestors=body.attestors,
+            include_unconfirmed=body.include_unconfirmed,
             max_calls=body.max_calls)
     except BatchError as e:
         raise _fail(e) from e
@@ -658,6 +690,34 @@ def get_batch(batch_id: str) -> dict:
         return batch.snapshot(batch_id)
     except BatchError as e:
         raise HTTPException(404, str(e)) from e
+
+
+@app.post("/api/batches/{batch_id}/approve")
+def approve_batch(batch_id: str, approved: bool = True) -> dict:
+    """Sign off on everything this scan wrote, in one gesture.
+
+    **This is still a person approving, and that is the whole distinction the
+    skip rule rests on.** A scan may not approve its own output — a queue that
+    signed off on its drafts would skip, on its next pass, everything it had
+    just produced. What this is instead is the same human gesture applied to a
+    reviewed batch rather than retyped six hundred times: it is reached from
+    the finished scan, it says how many rows it is about before it is pressed,
+    and it is as reversible as the single-row one, because withdrawing
+    approval is the same call with `approved=false`.
+
+    It does not change what any row *says*. An inherited verdict stays labelled
+    `inherited_from` after it is approved — approving a tier is not turning it
+    into a claim that was asked of that tag.
+    """
+    with session() as s:
+        if repo.get_batch(s, batch_id) is None:
+            raise HTTPException(404, f"No batch {batch_id!r}.")
+        rows = repo.batch_verdicts(s, batch_id, approved=not approved)
+        for row in rows:
+            repo.approve_verdict(s, row.id, approved=approved)
+        changed = [r.tag for r in rows]
+    return {"changed": len(changed), "tags": changed,
+            "batch": batch.snapshot(batch_id)}
 
 
 @app.post("/api/batches/{batch_id}/pause")

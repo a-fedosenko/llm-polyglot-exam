@@ -267,6 +267,18 @@ class Verdict(Base):
     #: if it had been asked — inheriting a tier is not inheriting a claim.
     inherited_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    #: Re-scored rather than measured: the corrections a person made to the
+    #: judge or the panel, and the reason this row exists at all.
+    #:
+    #: The judge is a model and models are wrong — protocol 016 found 90% of one
+    #: metric's disagreements with fact recall were adequate translations — so a
+    #: person who can see a fact *is* in the text has to be able to say so and
+    #: have it count. What they may not do is edit the measurement: this is a
+    #: second row on the same run, carrying what was corrected, and it becomes
+    #: the standing answer only when somebody promotes it. Both readings stay
+    #: on record, which is the difference between a correction and a rewrite.
+    adjudicated: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     current: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     approved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
@@ -388,7 +400,14 @@ class Batch(Base):
 
 
 class BatchItem(Base):
-    """One equivalence class within a batch. The unit of resumption.
+    """One unit of a batch, and the unit of resumption.
+
+    What a unit *is* depends on the test, and the two are not interchangeable.
+    A capability scan walks equivalence classes: `representative` is the tag
+    actually probed and `members` are the tags that inherit its tier. A dialect
+    battery walks varieties, because its claim is about one variety and nothing
+    can inherit it: `representative` is the subject, `members` is just that tag,
+    and `contrast` is the other arm.
 
     Items carry their own state, so a killed batch restarts from where it
     stopped rather than from zero, and a skipped tag records *why* it was
@@ -397,7 +416,13 @@ class BatchItem(Base):
     """
 
     __tablename__ = "batch_item"
-    __table_args__ = (UniqueConstraint("batch_id", "cls", name="uq_batch_item"),)
+    #: Keyed on the representative, not the class. A dialect batch has one item
+    #: per variety and a family's varieties share a class, so a uniqueness rule
+    #: written on `cls` would admit Serbian once and refuse the rest of it. The
+    #: representative is also what `repo` looks an item up by, which is the
+    #: other half of why it is the right key.
+    __table_args__ = (UniqueConstraint("batch_id", "representative",
+                                       name="uq_batch_item"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_id: Mapped[str] = mapped_column(ForeignKey("batch.id", ondelete="CASCADE"),
@@ -405,6 +430,10 @@ class BatchItem(Base):
     cls: Mapped[str] = mapped_column(String(64))
     representative: Mapped[str] = mapped_column(String(64))
     members: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    #: The other arm of a dialect pair; null for a capability item. Stored
+    #: rather than re-derived when the item runs: a queue that worked out its
+    #: own pair could contrast against something the plan never said it would.
+    contrast: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     skip_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)

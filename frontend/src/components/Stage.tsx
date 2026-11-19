@@ -138,6 +138,17 @@ function ItemStep({ r, adjudication, onOverrideFact }: any) {
   for (const a of adjudication?.applied ?? [])
     if (a.spec_id === r.spec_id) corrected[a.index] = a.now;
 
+  // What this item's own recall becomes once the corrections are counted.
+  // Worked out here rather than asked of the server, because it is arithmetic
+  // over verdicts already on screen — and it belongs on screen: the measured
+  // chip never moves, which reads as a correction having done nothing.
+  const judged: string[] = r.verdicts ?? [];
+  const mineCount = Object.keys(corrected).length;
+  const correctedRecall = mineCount && judged.length
+    ? judged.filter((v: string, i: number) => (corrected[i] ?? v) === "present").length
+      / judged.length
+    : null;
+
   return (
     <>
       {r.gate === "no_answer" ? (
@@ -204,9 +215,16 @@ function ItemStep({ r, adjudication, onOverrideFact }: any) {
           title="The fact checklist"
           info="Fact recall is the measurement. The judge is a model and models are wrong — one study found 90% of a rival metric's disagreements with fact recall were adequate translations — so you can overrule a verdict here and see what the run would have scored."
           right={r.recall !== null && r.recall !== undefined
-            ? <Badge tone={r.recall >= 0.95 ? "ok" : r.recall ? "warn" : "bad"}>
-                recall {(r.recall as number).toFixed(2)}
-              </Badge>
+            ? <span className="flex items-center gap-1.5">
+                <Badge tone={r.recall >= 0.95 ? "ok" : r.recall ? "warn" : "bad"}>
+                  recall {(r.recall as number).toFixed(2)}
+                </Badge>
+                {correctedRecall !== null && (
+                  <Badge tone={correctedRecall >= 0.95 ? "ok" : correctedRecall ? "warn" : "bad"}>
+                    corrected {correctedRecall.toFixed(2)}
+                  </Badge>
+                )}
+              </span>
             : undefined}
         >
           <ul className="divide-y divide-line rounded-md border border-line">
@@ -235,9 +253,20 @@ function ItemStep({ r, adjudication, onOverrideFact }: any) {
                             : "text-ink-faint"}`}
                           aria-pressed={x === v}
                           title={x === judged
-                            ? `What the judge answered. Click to put it back, if you had overruled it.`
-                            : `Say this fact is ${x}, and see what the run would have scored. The measurement itself is never changed.`}
-                          onClick={() => onOverrideFact(r.spec_id, i, x)}
+                            ? "What the judge answered. Click to put the verdict back to its reading."
+                            : `Say this fact is ${x}. The run is re-scored and that becomes the standing verdict; the judge's reading stays on record.`}
+                          onClick={() => {
+                            // Asked once, in plain words, because this changes
+                            // the standing answer for the language — not a
+                            // note beside it. Reversible, and the dialog says
+                            // so, which is what stops it reading as a warning.
+                            const back = x === judged;
+                            const ok = window.confirm(
+                              back
+                                ? `Put this fact back to the judge's reading (${judged})?\n\n“${f}”\n\nThe run is re-scored and the verdict returns to what the judge measured.`
+                                : `Record this fact as ${x}?\n\n“${f}”\nThe judge said ${judged}.\n\nThe run is re-scored and this becomes the standing verdict for ${r.designator ?? "this language"} — what the coverage table reads and what a batch scan skips on. The judge's reading stays on record, and clicking “${judged}” puts it back.`);
+                            if (ok) onOverrideFact(r.spec_id, i, x);
+                          }}
                         >
                           {x}
                         </button>

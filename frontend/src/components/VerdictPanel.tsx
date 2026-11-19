@@ -32,12 +32,32 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
     api.verdictHistory(outcome.engine, outcome.tag, outcome.test_type)
       .then((r) => {
         setHistory(r.verdicts);
-        setVerdict(r.verdicts.find((v) => v.run_id === runId)
+        // This run can now have two rows — what the judge said, and what it
+        // said once corrected. The standing-answer card is about whichever one
+        // *counts*, so the current row wins; failing that, the measurement,
+        // because an unpromoted correction is not an answer yet.
+        const mine = r.verdicts.filter((v) => v.run_id === runId);
+        setVerdict(mine.find((v) => v.current)
+                   ?? mine.find((v) => !v.adjudicated)
                    ?? r.verdicts.find((v) => v.current) ?? null);
       })
       .catch(() => {});
   };
-  useEffect(load, [runId, promptEdited]);
+  // Re-read when a correction lands: adjudicating writes a second row on this
+  // run, and a panel that did not notice would offer to promote nothing.
+  useEffect(load, [runId, promptEdited, adjudication]);
+
+  // The row this run's corrections produced, if any. Found in the history
+  // rather than remembered from the adjudication response, so it is still
+  // there after a reload — a correction that vanished when the page refreshed
+  // would be exactly the thing the operator distrusts.
+  const corrected = history.find((v) => v.run_id === runId && v.adjudicated);
+  const judged = history.find((v) => v.run_id === runId && !v.adjudicated);
+
+  const promote = async (id: number) => {
+    setBusy(true);
+    try { await api.promote(id); load(); } finally { setBusy(false); }
+  };
 
   const approve = async (yes: boolean) => {
     if (!verdict) return;
@@ -47,22 +67,45 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
 
   const overruled = !!(outcome as any).instrument_overridden;
   const unstored = promptEdited || overruled;
-  const tone = TIER_TONE[outcome.level] ?? "";
   const spent = Object.values(outcome.calls ?? {}).reduce((a, b) => a + b, 0);
+
+  // **What this panel shows is the standing answer, not the judge's.**
+  // A correction counts the moment it is made, so the headline has to move
+  // with it: a page whose big number stayed on a reading the operator has just
+  // disproved is the page telling them their correction did nothing.
+  const adj = (adjudication?.applied ?? []).length
+    ? adjudication.adjudicated : null;
+  const level = adj ? (adj.tier ?? adj.verdict ?? outcome.level) : outcome.level;
+  const confidence = adj
+    ? (adj.borderline !== undefined
+        ? (adj.borderline ? "low" : "high") : adj.confidence ?? outcome.confidence)
+    : outcome.confidence;
+  const sContent = adj?.s_content ?? outcome.s_content;
+  const sLang = adj?.s_lang ?? outcome.s_lang;
+  const ci = adj?.ci ?? [outcome.ci_low, outcome.ci_high];
+  const tone = TIER_TONE[level] ?? "";
 
   return (
     <div className="scroll h-full space-y-4 p-4">
       <div>
         <div className="flex items-center gap-2">
           <h2 className="text-[15px] font-semibold text-ink">Verdict</h2>
-          <Badge tone={outcome.confidence === "high" ? "ok" : "warn"}>
-            confidence {outcome.confidence}
+          {adj && <Badge tone="warn">corrected</Badge>}
+          <Badge tone={confidence === "high" ? "ok" : "warn"}>
+            confidence {confidence}
           </Badge>
           <button className="btn btn-sm ml-auto" onClick={onClear}>New test</button>
         </div>
         <div className={`mt-3 text-[30px] font-semibold leading-none ${toneText[tone]}`}>
-          {outcome.level}
+          {level}
         </div>
+        {adj && (
+          <div className="mt-1 text-[11.5px] text-ink-faint">
+            your reading · the judge scored{" "}
+            <b className="text-ink-soft">{fmt(adjudication.measured)}</b>, and
+            that row is still on record below
+          </div>
+        )}
         <div className="mt-1.5 font-mono text-[12px] text-ink-faint">
           {outcome.engine} · {outcome.tag}
           {outcome.designator && ` · asked as “${outcome.designator}”`}
@@ -78,11 +121,11 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
 
       {outcome.test_type === "capability" && (
         <div className="card grid grid-cols-2 divide-x divide-line">
-          <Cell label="adequacy" value={outcome.s_content?.toFixed(2)}
-                sub={outcome.ci_low != null
-                  ? `90% CI ${outcome.ci_low.toFixed(2)}–${outcome.ci_high?.toFixed(2)}`
+          <Cell label="adequacy" value={sContent?.toFixed(2)}
+                sub={ci?.[0] != null
+                  ? `90% CI ${ci[0].toFixed(2)}–${ci[1]?.toFixed(2)}`
                   : undefined} />
-          <Cell label="eligibility" value={outcome.s_lang?.toFixed(2)}
+          <Cell label="eligibility" value={sLang?.toFixed(2)}
                 sub={outcome.refusals ? `${outcome.refusals} refusal(s)` : undefined} />
         </div>
       )}
@@ -135,6 +178,16 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
                   <span className={`font-medium ${toneText[TIER_TONE[h.level] ?? ""]}`}>
                     {h.level}
                   </span>
+                  {h.adjudicated && (
+                    <span className="chip text-[10.5px] text-warn"
+                          title={h.adjudicated
+                            .map((a) => a.fact
+                              ? `“${a.fact}”: ${a.was} → ${a.now}`
+                              : `${a.attestor} · ${a.probe}`)
+                            .join("\n")}>
+                      corrected ×{h.adjudicated.length}
+                    </span>
+                  )}
                   <span className="text-ink-faint">{h.measured_at?.slice(0, 16).replace("T", " ")}</span>
                   <span className="truncate font-mono text-[11px] text-ink-faint">
                     {outcome.test_type === "dialect"
@@ -153,15 +206,15 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
       )}
 
       {adjudication && (
-        <Section title="If the judge had answered differently"
-                 info="This is never written over the measurement. It reports what the same run would have scored — a number you can hand-edit after the fact is not a measurement.">
+        <Section title="Corrected reading"
+                 info="The judge is a model and models are wrong. A correction is re-scored through the same function that produced the measurement, and recorded as a second row on this run — so both readings stay on record and a person decides which one counts. Nothing is ever written over a measurement.">
           <div className="card p-3 text-[12.5px]">
             <div className="flex items-baseline gap-3">
-              <span className="text-ink-faint">measured</span>
+              <span className="text-ink-faint">judge</span>
               <span className="font-semibold tabular-nums">
                 {fmt(adjudication.measured)}
               </span>
-              <span className="text-ink-faint">→ adjudicated</span>
+              <span className="text-ink-faint">→ corrected</span>
               <span className="font-semibold tabular-nums text-accent">
                 {fmt(adjudication.adjudicated)}
               </span>
@@ -174,7 +227,36 @@ export function VerdictPanel({ runId, outcome, promptEdited, adjudication, onCle
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[11.5px] text-ink-faint">{adjudication.note}</p>
+
+            {corrected?.current ? (
+              <div className="mt-2.5 space-y-1.5">
+                <p className="text-[11.5px] leading-relaxed text-ink-faint">
+                  <b className="text-ink-soft">This is the standing answer.</b>{" "}
+                  The coverage table and a batch scan read it. The judge's
+                  reading is untouched beside it — putting it back is one click,
+                  and so is changing a fact back in the checklist.
+                </p>
+                {judged && (
+                  <button className="btn w-full justify-center" disabled={busy}
+                          onClick={() => promote(judged.id)}>
+                    Put the judge's reading back ({judged.level})
+                  </button>
+                )}
+              </div>
+            ) : corrected ? (
+              <div className="mt-2.5 space-y-1.5">
+                <p className="text-[11.5px] leading-relaxed text-warn">
+                  Recorded, but the table is reading the judge's row — somebody
+                  promoted it back.
+                </p>
+                <button className="btn btn-primary w-full justify-center"
+                        disabled={busy} onClick={() => promote(corrected.id)}>
+                  Make this the standing answer again
+                </button>
+              </div>
+            ) : (
+              <p className="mt-2 text-[11.5px] text-ink-faint">{adjudication.note}</p>
+            )}
           </div>
         </Section>
       )}

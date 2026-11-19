@@ -160,9 +160,19 @@ def test_a_recorded_reference_is_found_by_region_not_by_tag_spelling(scheme):
         "one region, resolved separately in each script class"
 
 
-def test_the_rule_covers_the_families_that_need_no_entry(scheme):
+def test_every_family_in_the_shipped_list_is_written_down(scheme):
+    """The file used to hold only the exceptions, and a family nobody had
+    thought about was therefore invisible — Catalan sat on `ca-AD` by
+    alphabetical accident with nothing on the page saying so. One entry per
+    family, rule-derivable or not, is what makes the open questions countable
+    in one place."""
+    cov = ref.coverage(scheme)
+    assert cov["unlisted"] == [], \
+        "a contrastable family with no entry falls back to list order"
+    # The subtag rule still resolves a family this file does not carry, which
+    # is what keeps somebody else's locale list working.
     r = ref.reference_for(scheme, "por|Latn")
-    assert r.tag == "pt-pt" and r.basis == "rule"
+    assert r.tag == "pt-pt" and r.basis == "recorded"
     assert ref.reference_for(scheme, "rus|Cyrl").tag == "ru-ru"
 
 
@@ -174,16 +184,69 @@ def test_a_region_that_matches_two_members_falls_through_to_a_tag(scheme):
     assert r.tag == "az-az-latn" and r.basis == "recorded"
 
 
-def test_an_undecided_family_is_provisional_and_says_so(scheme):
+def test_a_written_but_unconfirmed_reference_is_not_a_decision(scheme):
+    """`reviewed: false` is a claim with a reason attached and nobody behind
+    it. It must not read as settled, and a scan must not take it by default."""
     r = ref.reference_for(scheme, "afr|Latn")
-    assert r.basis == "provisional"
-    assert r.decided is False, "a placeholder must never read as a decision"
+    assert r.tag == "af-za", "the proposal, not the alphabetical accident"
+    assert r.basis == "proposed"
+    assert r.decided is False, "a proposal must never read as a decision"
+
+
+def test_a_family_with_no_entry_falls_back_and_says_it_is_standing_in(scheme,
+                                                                      monkeypatch):
+    """The fallback still exists for locale lists this file does not cover."""
+    monkeypatch.setattr(ref, "_overlay", lambda: {})
+    r = ref.reference_for(scheme, "afr|Latn")
+    assert r.basis == "provisional" and r.decided is False
+
+
+def test_every_baseline_is_written_in_the_conventional_form(scheme):
+    """`en-US`, not `en-us`. Nothing resolves on the spelling — `_resolve`
+    reads subtags — so this is purely about the file being recognisable to the
+    person reviewing it, and about not implying it is tied to one list's
+    conventions."""
+    odd = []
+    for cls, entry in ref._overlay().items():
+        baseline = entry.get("baseline")
+        if not baseline:
+            continue
+        lang = ref._resolve(scheme, cls, baseline)
+        if lang is not None and baseline != ref.canonical_tag(lang):
+            odd.append((cls, baseline, ref.canonical_tag(lang)))
+    assert not odd, odd
+
+
+def test_each_entry_describes_itself_truthfully(scheme):
+    """`language`, `baseline` and `varieties` are a reading aid — the resolver
+    ignores them — which is exactly why they have to be checked: a file whose
+    readable half has quietly gone wrong is a file nobody can review. Fix with
+    `polyglot references --annotate`."""
+    wrong = []
+    for cls, entry in ref._overlay().items():
+        r = ref.reference_for(scheme, cls)
+        lang = scheme.get(r.tag) if r.tag else None
+        region = (lang.region_name or lang.region) if lang else None
+        want = {
+            "language": next((l.name for l in scheme.languages.values()
+                              if l.cls == cls), None),
+            "script": cls.partition("|")[2] or None,
+            "baseline_title": (None if lang is None else
+                               f"{lang.name} ({region})" if region else lang.name),
+        }
+        for key, is_ in want.items():
+            if key in entry and entry[key] != is_:
+                wrong.append((f"{cls}.{key}", entry[key], is_))
+        if entry.get("baseline") and r.basis not in ("recorded", "proposed"):
+            wrong.append((f"{cls}.baseline", entry["baseline"],
+                          "not in this locale list"))
+    assert not wrong, wrong
 
 
 def test_coverage_counts_only_families_that_can_be_contrasted(scheme):
     cov = ref.coverage(scheme)
-    assert cov["families"] == cov["decided"] + len(cov["provisional"])
-    assert "srp|Latn" not in cov["provisional"]
+    assert cov["families"] == cov["decided"] + len(cov["unconfirmed"])
+    assert "srp|Latn" not in cov["unconfirmed"]
 
 
 # -- the evidence an operator overrules ----------------------------------------

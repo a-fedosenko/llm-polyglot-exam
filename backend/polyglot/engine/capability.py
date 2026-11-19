@@ -909,12 +909,14 @@ class CapabilityMachine:
     def adjudicate(self, overrides: list[dict]) -> dict:
         """Re-score the run with a reader's corrections to the judge.
 
-        **It never edits the measurement.** The stored result stands; this
-        reports what the same run would have scored had the judge answered
-        differently, and the two sit side by side. A measurement that could be
-        hand-edited after the fact is not a measurement, and an adjudicated
-        number silently replacing a measured one is how a result comes to mean
-        something nobody can reconstruct.
+        **It never edits the measurement.** The judge's result stands exactly
+        as measured; this is a second reading of the same run, and the two sit
+        side by side — `runner` records it as its own verdict row and makes it
+        the standing answer, which a person can hand back to the judge's row in
+        one click. A measurement that could be hand-edited after the fact is
+        not a measurement; a measurement with a second, labelled reading beside
+        it is a measurement somebody corrected, and the difference is that both
+        are still there to be read.
 
         The re-score goes through `score_run` — the function that produced the
         original number — rather than a copy of it, because two numbers on one
@@ -967,7 +969,7 @@ class CapabilityMachine:
             "applied": applied, "changed": len(applied),
             "measured": self._score(st).as_dict(),
             "adjudicated": rescored.as_dict(),
-            "note": "What this run would have scored had the judge answered this "
-                    "way. The measurement is unchanged, and an adjudicated run "
-                    "is never promoted to a verdict on its own.",
+            "note": "What this run scores with the judge corrected. The "
+                    "measurement itself is untouched and stays on record as "
+                    "its own row.",
         }

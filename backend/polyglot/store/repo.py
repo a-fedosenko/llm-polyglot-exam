@@ -172,6 +172,65 @@ def put_verdict(s: Session, data: dict, *, promote: bool | None = None) -> Verdi
     return row
 
 
+def put_adjudicated_verdict(s: Session, data: dict) -> int:
+    """Record the corrected reading of one run, and make it the one that counts.
+
+    **One adjudicated row per run, not one per click.** Corrections arrive one
+    fact at a time and each is re-scored from the measurement over the whole
+    set, so every call carries the complete correction — appending would leave
+    a trail of superseded readings that all look like answers.
+
+    **It is promoted.** A person who can see that a fact is in the text is a
+    better instrument than the judge on that fact, and a correction that did
+    not move the standing answer would be a comment rather than a control. What
+    makes this a correction and not a rewrite is that the judge's row is still
+    there, unedited, and promoting it back is one click: both readings are on
+    record and the pointer says which one the table reads.
+    """
+    existing = s.scalar(select(Verdict).where(
+        Verdict.run_id == data["run_id"],
+        Verdict.adjudicated.isnot(None)))
+    if existing is None:
+        row = put_verdict(s, data, promote=False)
+        promote_verdict(s, row.id)
+        s.flush()
+        return row.id
+    for k, v in data.items():
+        setattr(existing, k, v)
+    # A re-correction is a new reading of the same run: it loses the sign-off,
+    # because nobody has read *this* one yet.
+    existing.approved, existing.approved_at = False, None
+    existing.measured_at = _now()
+    promote_verdict(s, existing.id)
+    s.flush()
+    return existing.id
+
+
+def clear_adjudicated_verdict(s: Session, run_id: str) -> bool:
+    """Take the corrected reading back off the record.
+
+    What happens when the operator puts every fact back to what the judge said:
+    there is no correction any more, so there must be no corrected row — a row
+    recording "I changed nothing" would be a claim about the judge that nobody
+    made. If it was the one that counted, the measurement it displaced takes
+    the pointer back, which is what makes this reversible rather than merely
+    undoable.
+    """
+    row = s.scalar(select(Verdict).where(
+        Verdict.run_id == run_id, Verdict.adjudicated.isnot(None)))
+    if row is None:
+        return False
+    was_current = row.current
+    s.delete(row)
+    s.flush()
+    if was_current:
+        measured = s.scalar(select(Verdict).where(
+            Verdict.run_id == run_id, Verdict.adjudicated.is_(None)))
+        if measured is not None:
+            promote_verdict(s, measured.id)
+    return True
+
+
 def promote_verdict(s: Session, verdict_id: int) -> Verdict | None:
     """Make one stored measurement the one that counts. Destroys nothing."""
     row = s.get(Verdict, verdict_id)
@@ -204,6 +263,29 @@ def approve_verdict(s: Session, verdict_id: int, *, approved: bool = True
     if approved:
         promote_verdict(s, verdict_id)
     return row
+
+
+def batch_verdicts(s: Session, batch_id: str, *, approved: bool | None = None,
+                   method_version: str = METHOD_VERSION) -> list[Verdict]:
+    """The standing verdicts this batch's runs produced.
+
+    Reached through `Run.batch_id` rather than through a list of tags, because
+    that join is the batch's only claim on a verdict: a scan does not own a
+    tag, it owns the runs it paid for. A row measured by hand between two scans
+    of the same scope therefore does not answer to either of them.
+
+    **Inherited rows are included**, and deliberately: they carry the measuring
+    run's id, so they are part of what this scan produced. They are also the
+    rows where a bulk gesture matters most — nothing was asked of those tags,
+    which is why `inherited_from` stays on them whatever anyone signs.
+    """
+    mine = select(Run.id).where(Run.batch_id == batch_id)
+    q = select(Verdict).where(Verdict.run_id.in_(mine),
+                              Verdict.method_version == method_version,
+                              Verdict.current.is_(True))
+    if approved is not None:
+        q = q.where(Verdict.approved.is_(approved))
+    return list(s.scalars(q.order_by(Verdict.tag)))
 
 
 def verdict_history(s: Session, *, engine: str, tag: str, test_type: str,

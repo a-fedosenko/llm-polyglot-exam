@@ -154,6 +154,11 @@ export interface VerdictRow {
   measured_at: string | null;
   notes: string[] | null;
   detail: Record<string, any> | null;
+  /** Present only on a re-scored row: the corrections a person made to the
+   *  judge or the panel. The row is recorded beside the measured one and
+   *  becomes the standing answer only when somebody promotes it. */
+  adjudicated?: { index?: number; fact?: string; was?: string; now?: string;
+                  probe?: string; attestor?: string; correct?: boolean }[] | null;
 }
 
 /** One tag of the loaded locale list, with whatever is stored about it.
@@ -174,6 +179,31 @@ export interface CoverageRow {
   cls: string;
   class_size: number;
   verdict: (VerdictRow & { inherited_from?: string | null; cls?: string | null }) | null;
+  /** Only on a dialect coverage read: what a battery would hold this tag
+   *  against, or why it would refuse. Sent with the row rather than worked out
+   *  in the page, so the table and the scan plan cannot disagree about which
+   *  tags are testable — they come from one function. */
+  pairing?: Pairing;
+}
+
+/** What a dialect battery contrasts one tag against, and on what authority.
+ *
+ *  `basis` is the thing to read before the result: `recorded` and `rule` are
+ *  decisions, `provisional` is the first member of the class standing in for a
+ *  decision nobody has made. A page that rendered them alike would turn an open
+ *  question into a silent claim. */
+export interface Pairing {
+  tag: string;
+  reference: string | null;
+  /** `recorded` a person stood behind it · `proposed` written down with a
+   *  reason, unconfirmed · `rule` derived from the subtags · `provisional` the
+   *  file does not cover this family and list order is standing in. */
+  basis: "recorded" | "proposed" | "rule" | "provisional" | "none";
+  why: string;
+  blocked: string | null;
+  blocked_why: string;
+  testable: boolean;
+  decided: boolean;
 }
 
 /** Which of the three states the skip rule distinguishes a scan may measure
@@ -185,9 +215,17 @@ export interface BatchPlanItem {
   cls: string;
   representative: string;
   members: string[];
+  /** The other arm, on a dialect item. Null on a capability item, which walks
+   *  classes and has no pair. */
+  contrast?: string | null;
+  reference_basis?: Pairing["basis"];
+  reference_confirmed?: boolean;
+  reference_why?: string;
+  blocked_why?: string;
   language: string | null;
   script: string | null;
-  designator: string;
+  region?: string | null;
+  designator: string | null;
   divergent_siblings: string[];
   inherits: number;
   skip_reason: string | null;
@@ -200,6 +238,10 @@ export interface BatchPlan {
   test_type: TestType;
   rescan: Rescan;
   scheme: string;
+  /** What one item of this plan *is*: a capability scan walks equivalence
+   *  classes, a dialect battery walks varieties. Named rather than inferred
+   *  from `test_type`, so the page says what the plan says. */
+  unit: "class" | "variety";
   requested_tags: number;
   unknown_tags: string[];
   classes: number;
@@ -207,6 +249,11 @@ export interface BatchPlan {
   inheriting_tags: number;
   skipped: Record<string, number>;
   divergent_siblings: string[];
+  /** Varieties this scan would measure against a baseline nobody has
+   *  confirmed. Listed, not counted: a reader has to be able to see which. */
+  unconfirmed: string[];
+  /** The panel that survived the family guard, on a dialect plan. */
+  attestors: string[];
   estimated_calls: { minimum: number; typical: number; maximum: number };
   max_calls: number | null;
   over_budget: boolean;
@@ -217,6 +264,7 @@ export interface BatchItem {
   cls: string;
   representative: string;
   members: string[];
+  contrast?: string | null;
   status: "pending" | "running" | "done" | "skipped" | "failed";
   skip_reason: string | null;
   run_id: string | null;
@@ -236,6 +284,9 @@ export interface BatchSnapshot {
   unknown_tags: string[];
   plan: BatchPlan | null;
   running_run_id: string | null;
+  /** What this scan put on record, and how much of it nobody has stood behind
+   *  yet. Counted from the runs the batch paid for. */
+  verdicts: { written: number; drafts: number; inherited: number };
   created_at: string | null;
   finished_at: string | null;
   items: BatchItem[];

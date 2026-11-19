@@ -819,8 +819,9 @@ class DialectMachine:
         An override here is a statement about the attestor, not about the model.
         Overruling "generic" to "correct" on a text you can read yourself is the
         operator supplying the competence the panel lacked; it does not make the
-        panel competent, and an adjudicated dialect run is never promoted on its
-        own.
+        panel competent, and the corrected reading is recorded as its own
+        verdict row — labelled, beside the measured one, and handed back to the
+        panel's reading in one click.
         """
         import copy
 
@@ -876,9 +877,9 @@ class DialectMachine:
                             "confidence": adjusted.confidence,
                             "identified": adjusted.identified.as_dict(),
                             "separated": adjusted.separated.as_dict()},
-            "note": "What this run would have concluded had the panel answered "
-                    "this way. The measurement is unchanged, and an adjudicated "
-                    "run is never promoted to a verdict on its own.",
+            "note": "What this run concludes with the panel corrected. The "
+                    "measurement itself is untouched and stays on record as "
+                    "its own row.",
         }
 
 

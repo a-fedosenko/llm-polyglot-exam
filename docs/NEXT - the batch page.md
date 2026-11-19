@@ -1,12 +1,14 @@
 # Next: the batch page
 
-## Where this stands (2026-11-18)
+## Where this stands (2026-11-19)
 
-**Built and tested**: the capability scan. `engine/batch.py` plans for free, queues one class at a time through `runner.drive` — the same loop the page steps by hand — propagates the class result to its other tags as `inherited_from`, updates `calls_used` during the scan, and enforces `max_calls` by refusing to start a class it cannot pay for. The page is `Coverage & scan`: the locale list is its spine, so the tags with nothing stored are visible rather than absent, and the scope you are reading is the scan set. `tests/test_batch.py` pins the rules the schema cannot.
+**Built and tested**: both scans. The capability scan walks equivalence classes; the dialect scan walks varieties against their reference. One queue, one budget, one plan shape — `plan["unit"]` says which of the two a plan describes, and the page reads that rather than inferring it from the test type.
+
+The capability scan, in its own terms: `engine/batch.py` plans for free, queues one class at a time through `runner.drive` — the same loop the page steps by hand — propagates the class result to its other tags as `inherited_from`, updates `calls_used` during the scan, and enforces `max_calls` by refusing to start a class it cannot pay for. The page is `Coverage & scan`: the locale list is its spine, so the tags with nothing stored are visible rather than absent, and the scope you are reading is the scan set. `tests/test_batch.py` pins the rules the schema cannot.
 
 **Decided**, of the three below:
 
-- *What a dialect batch iterates over* — still open, and deliberately: a scan needs the contrast sibling per family recorded first, and that information does not exist yet. The scan refuses a dialect test type in words rather than guessing a pairing. Stored dialect verdicts are still shown in the table.
+- *What a dialect batch iterates over* — **settled, and built.** It walks **varieties**, not families: one item per variety, each held against its class's reference variety from `references/reference-varieties.json`. That is what makes the queue linear — a family of 26 is 25 contrasts rather than 325 pairs — and it is also what makes two results in one family comparable, since they were measured against the same baseline. Nothing inherits: whether a model marks *this* variety is the whole claim, so there is no second tag it could be true of. The tags a battery cannot answer are named in the plan rather than dropped — the umbrella (the conversion source, never an arm), the reference itself, a tag naming no region, a reference in another alphabet, and a family recorded as having no defensible baseline. Every contrastable family is now written down in `references/reference-varieties.json` — the ones a rule could derive included — each with its baseline, a reason, and a `reviewed` flag. Until a person sets `reviewed: true` the entry is a **proposal**, and a scan leaves its varieties out: measuring the 35 still-unconfirmed families against baselines nobody has stood behind would turn an open question into a table of claims. `include_unconfirmed` is the deliberate gesture, the varieties it affects are listed rather than counted, and `polyglot references` prints the state of all 57 in one pass.
 - *Whether a batch may auto-approve* — no, and the tests hold it. The review queue ordered by what a human pass would buy is not built.
 - *The budget* — `max_calls` fails closed, compared against the plan's floor, because a queue can only be stopped between items.
 
@@ -58,7 +60,7 @@ And there is a sharp edge the single-language page already surfaces and the batc
 
 ## Three decisions to settle first
 
-**1. What a dialect batch even iterates over.** A capability scan walks classes. A dialect battery needs a *pair*, so it walks families, and a family with 22 members has 231 pairs. Protocol 021's sample is five families against one sibling each. The likely answer is: one named variety against the family's most-contrastive sibling, chosen once per family — but "most contrastive" is a claim, and choosing it by hand for the families that matter is more defensible than deriving it.
+**1. What a dialect batch even iterates over.** *Answered above, and built.* Not the most-contrastive sibling in the end, but a single recorded **reference** per family: the choice is still made by hand where it matters, and holding every variety against one baseline is what makes the results within a family comparable — a sibling chosen per pair would have made each contrast measure a different thing.
 
 **2. Whether a batch may auto-approve.** It must not, by default: approval is a person reading evidence, and a scan that approved its own output would make the skip rule meaningless. But a 602-locale scan producing 602 drafts nobody will ever open is also not useful. The shape that probably works is a review queue ordered by how much a human pass would buy — borderline rows, split panels, and fabricated markers first.
 

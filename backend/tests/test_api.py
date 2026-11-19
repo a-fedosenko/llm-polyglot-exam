@@ -287,6 +287,135 @@ def test_a_ruling_on_the_reader_keeps_the_run_out_of_the_verdicts(client):
         "a run whose instrument the operator overruled is never stored"
 
 
+def graded_run(client, tag: str = "pt") -> dict:
+    """A capability run driven to a verdict, and its last step."""
+    run = client.post("/api/runs", json={"test_type": "capability", "tag": tag,
+                                         "engine": "acme-a", "mode": "manual",
+                                         "backtranslator_panel": ["other-b"],
+                                         "judge_model": "other-c"}).json()
+    for _ in range(60):
+        step = client.post(f"/api/runs/{run['id']}/step").json()
+        if step["status"] != "running":
+            break
+    assert step["status"] == "done", step
+    return {"id": run["id"], "step": step}
+
+
+def test_a_correction_counts_immediately_and_leaves_the_judge_on_record(client):
+    """The judge is a model and models are wrong. A reader who can see that a
+    fact is in the text is the better instrument on that fact, so the
+    correction becomes the standing answer at once — and what makes it a
+    correction rather than a rewrite is that the judge's row is untouched
+    beside it, one click from being the answer again."""
+    run = graded_run(client)
+    spec = run["step"]["outcome"]["items"][0]["spec_id"]
+    measured = run["step"]["outcome"]["level"]
+
+    out = client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+        {"spec_id": spec, "index": 0, "verdict": "missing"}]}).json()
+    assert out["verdict_id"]
+    assert out["adjudicated"]["tier"] != out["measured"]["tier"], \
+        "this fixture's correction is supposed to move the tier"
+
+    rows = client.get("/api/verdicts/history",
+                      params={"engine": "acme-a", "tag": "pt",
+                              "test_type": "capability"}).json()["verdicts"]
+    adj = next(v for v in rows if v["adjudicated"])
+    judged = next(v for v in rows if not v["adjudicated"])
+    assert adj["current"] is True, "the correction is what the table reads"
+    assert judged["current"] is False
+    assert judged["level"] == measured, "the judge's reading is untouched"
+
+    standing = [v for v in client.get("/api/verdicts",
+                                      params={"engine": "acme-a"}).json()["verdicts"]
+                if v["tag"] == "pt"]
+    assert len(standing) == 1 and standing[0]["level"] == adj["level"]
+
+    # And back: promoting the judge's row returns the table to its reading,
+    # with the correction still on record.
+    client.post(f"/api/verdicts/{judged['id']}/promote")
+    standing = [v for v in client.get("/api/verdicts",
+                                      params={"engine": "acme-a"}).json()["verdicts"]
+                if v["tag"] == "pt"]
+    assert len(standing) == 1 and standing[0]["level"] == measured
+
+
+def test_putting_every_fact_back_removes_the_corrected_row(client):
+    """A correction that corrects nothing is not a reading of anything. Going
+    back to the judge's answers has to leave the table exactly where it was."""
+    run = graded_run(client)
+    item = run["step"]["outcome"]["items"][0]
+    spec, judged_first = item["spec_id"], item["verdicts"][0]
+    measured = run["step"]["outcome"]["level"]
+
+    client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+        {"spec_id": spec, "index": 0, "verdict": "missing"}]})
+    back = client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+        {"spec_id": spec, "index": 0, "verdict": judged_first}]}).json()
+    assert back["changed"] == 0
+    assert not back.get("verdict_id")
+
+    rows = client.get("/api/verdicts/history",
+                      params={"engine": "acme-a", "tag": "pt",
+                              "test_type": "capability"}).json()["verdicts"]
+    assert not [v for v in rows if v["adjudicated"]]
+    assert len(rows) == 1 and rows[0]["current"] and rows[0]["level"] == measured
+
+
+def test_correcting_again_replaces_the_corrected_row_rather_than_stacking(client):
+    run = graded_run(client)
+    spec = run["step"]["outcome"]["items"][0]["spec_id"]
+    for index in (0, 1):
+        out = client.post(f"/api/runs/{run['id']}/adjudicate", json={"overrides": [
+            {"spec_id": spec, "index": index, "verdict": "missing"}]}).json()
+    rows = client.get("/api/verdicts/history",
+                      params={"engine": "acme-a", "tag": "pt",
+                              "test_type": "capability"}).json()["verdicts"]
+    adj = [v for v in rows if v["adjudicated"]]
+    assert len(adj) == 1
+    assert len(adj[0]["adjudicated"]) == 2, "it carries the whole correction"
+    assert out["verdict_id"] == adj[0]["id"]
+
+
+def test_a_correction_made_mid_run_is_re_scored_over_the_finished_run(client):
+    """A correction clicked at step seven was scored against a run that was not
+    finished, and the page kept showing that pair of numbers afterwards."""
+    run = client.post("/api/runs", json={"test_type": "capability", "tag": "pt",
+                                         "engine": "acme-a", "mode": "manual",
+                                         "backtranslator_panel": ["other-b"],
+                                         "judge_model": "other-c"}).json()
+    spec = None
+    for _ in range(60):
+        step = client.post(f"/api/runs/{run['id']}/step").json()
+        done = step["status"] != "running"
+        st = step.get("step") or {}
+        if spec is None and st.get("kind") == "judge":
+            spec = (st.get("result") or {}).get("spec_id")
+            mid = client.post(f"/api/runs/{run['id']}/adjudicate",
+                              json={"overrides": [{"spec_id": spec, "index": 0,
+                                                   "verdict": "missing"}]}).json()
+            assert mid["changed"] == 1
+            assert not mid.get("verdict_id"), \
+                "a half-measured run has no whole reading to record"
+        if done:
+            break
+    assert spec and step["status"] == "done"
+
+    snap = client.get(f"/api/runs/{run['id']}").json()
+    assert snap["adjudication"]["changed"] == 1
+    # The pair now describes the finished run, not the moment it was clicked.
+    assert snap["adjudication"]["measured"]["s_content"] == \
+        step["outcome"]["score"]["s_content"]
+
+    rows = client.get("/api/verdicts/history",
+                      params={"engine": "acme-a", "tag": "pt",
+                              "test_type": "capability"}).json()["verdicts"]
+    adj = [v for v in rows if v["adjudicated"]]
+    assert len(adj) == 1, "the correction is on record once the run has finished"
+    assert adj[0]["s_content"] < next(
+        v for v in rows if not v["adjudicated"])["s_content"]
+
+
 def test_a_second_correction_does_not_undo_the_first(client):
     """Adjudication re-scores from the measurement, so it needs every override.
 

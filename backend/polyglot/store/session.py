@@ -67,7 +67,76 @@ def engine():
 
 
 def create_all() -> None:
-    Base.metadata.create_all(engine())
+    eng = engine()
+    Base.metadata.create_all(eng)
+    _add_missing_columns(eng)
+    _reshape_batch_item(eng)
+
+
+#: Columns added to tables that already exist in somebody's database. SQLite
+#: adds a nullable column in place, so these need no rebuild — unlike a changed
+#: constraint, which does (see below).
+_ADDED: dict[str, dict[str, str]] = {
+    "verdict": {"adjudicated": "JSON"},
+}
+
+
+def _add_missing_columns(eng) -> None:
+    with eng.begin() as conn:
+        for table, columns in _ADDED.items():
+            have = {r[1] for r in conn.exec_driver_sql(
+                f"PRAGMA table_info({table})").fetchall()}
+            if not have:
+                continue
+            for name, decl in columns.items():
+                if name not in have:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def _reshape_batch_item(eng) -> None:
+    """Bring an older `batch_item` up to the shape the model describes.
+
+    The one migration this tool has, and it is here rather than in a migration
+    framework because it is the only one: the dialect scan needs a `contrast`
+    column and a uniqueness rule keyed on the representative instead of the
+    class, and SQLite can add the column but cannot drop a table-level
+    constraint. So the table is rebuilt and its rows copied.
+
+    Nothing else is touched. A batch is a *ledger of a scan* — the verdicts it
+    produced live in their own table, joined to the same runs the page
+    produces — so the worst case here costs a progress list, never a
+    measurement.
+    """
+    from polyglot.store.models import BatchItem
+
+    with eng.begin() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='batch_item'").fetchone()
+        if row is None:
+            return
+        ddl = row[0] or ""
+        if "contrast" in ddl and "representative)" in ddl:
+            return
+        carried = ("id, batch_id, cls, representative, members, status, "
+                   "skip_reason, run_id, error, started_at, finished_at")
+        # A half-finished earlier attempt leaves this behind, and the rename
+        # below would fail on it rather than on anything that matters.
+        conn.exec_driver_sql("DROP TABLE IF EXISTS batch_item_old")
+        conn.exec_driver_sql("ALTER TABLE batch_item RENAME TO batch_item_old")
+        # A rename carries the old table's indexes with it under their old
+        # names, and the fresh table wants those names back.
+        for (name,) in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='batch_item_old' AND name IS NOT NULL").fetchall():
+            if not name.startswith("sqlite_"):
+                conn.exec_driver_sql(f'DROP INDEX "{name}"')
+        BatchItem.__table__.create(conn)
+        conn.exec_driver_sql(
+            f"INSERT INTO batch_item ({carried}) "
+            f"SELECT {carried} FROM batch_item_old")
+        conn.exec_driver_sql("DROP TABLE batch_item_old")
 
 
 @contextmanager

@@ -38,6 +38,47 @@ def client(db, monkeypatch):
         yield c
 
 
+PT_CONVERTED = PT.replace("ônibus", "autocarro")
+
+
+@pytest.fixture
+def dialect_client(db, monkeypatch):
+    """The same scripted model, answering a battery instead of a ladder.
+
+    The two arms must come back *different*: one text under two designators is
+    not a contrast pair, and the battery stops on that before it pays a panel —
+    correctly, which would make this test measure nothing.
+    """
+    def separate(_n, _m, _system, prompt):
+        body = prompt.split("TEXT A:", 1)[-1]
+        a, b = body.split("TEXT B:", 1)
+        if a.strip() == b.strip():
+            # The identity control. One text shown as both halves cannot be two
+            # varieties, and an attestor that splits it is manufacturing a
+            # difference.
+            return json.dumps({"a": "indistinguishable",
+                               "b": "indistinguishable",
+                               "markers": [], "confidence": "high"})
+        return json.dumps({"a": "Portugal" if "autocarro" in a else "Brazil",
+                           "b": "Portugal" if "autocarro" in b else "Brazil",
+                           "markers": [], "confidence": "high"})
+
+    fake = ScriptedClient({
+        "generation": lambda _n, _m, s, _p: (
+            PT_CONVERTED if "Portugal" in (s or "") else PT),
+        "convert": PT_CONVERTED,
+        "identify": json.dumps({"answer": "Brazil", "markers": [],
+                                "confidence": "high"}),
+        "separate": separate,
+    })
+    monkeypatch.setattr("polyglot.engine.runner.build_client", lambda **kw: fake)
+    from polyglot.engine import batch, runner
+    runner.reset_for_tests()
+    batch.reset_for_tests()
+    with TestClient(app) as c:
+        yield c
+
+
 def scan(client, **over) -> dict:
     body = {"engine": "acme-a", "tags": ["pt", "pt-br"],
             "backtranslator_panel": ["other-b"], "judge_model": "other-c"}
@@ -91,11 +132,135 @@ def test_an_unknown_tag_is_reported_not_silently_dropped(client):
     assert plan["requested_tags"] == 1
 
 
-def test_a_dialect_scan_says_what_it_is_missing(client):
+def test_a_scan_can_be_approved_in_one_gesture_but_never_approves_itself(client):
+    """The bulk button is a *person* approving, which is the distinction the
+    skip rule rests on: a scan that signed off on its own drafts would skip,
+    next pass, everything it had just produced."""
+    started = client.post("/api/batches", json=scan(client, tags=["pt", "pt-br"]))
+    snap = settle(client, started.json()["id"])
+    assert snap["verdicts"]["drafts"] == 2, "measured and inherited, both drafts"
+    assert all(not v["approved"]
+               for v in client.get("/api/verdicts").json()["verdicts"])
+
+    out = client.post(f"/api/batches/{snap['id']}/approve").json()
+    assert out["changed"] == 2
+    assert sorted(out["tags"]) == ["pt", "pt-br"]
+    assert out["batch"]["verdicts"]["drafts"] == 0
+
+    rows = {v["tag"]: v for v in client.get("/api/verdicts").json()["verdicts"]}
+    assert all(v["approved"] for v in rows.values())
+    assert rows["pt-br"]["inherited_from"] == "pt", \
+        "approving a tier does not turn it into a claim asked of that tag"
+
+    # As reversible as the single-row chip, and by the same call.
+    back = client.post(f"/api/batches/{snap['id']}/approve",
+                       params={"approved": False}).json()
+    assert back["changed"] == 2
+    assert all(not v["approved"]
+               for v in client.get("/api/verdicts").json()["verdicts"])
+
+
+def test_approving_a_scan_leaves_rows_it_did_not_pay_for_alone(client):
+    """A scan does not own a tag, it owns the runs it paid for — so a verdict
+    measured by hand is not swept up by a batch over the same scope."""
+    client.post("/api/runs", json={"test_type": "capability", "tag": "es",
+                                   "engine": "acme-a", "mode": "auto",
+                                   "backtranslator_panel": ["other-b"],
+                                   "judge_model": "other-c"})
+    for _ in range(100):
+        rows = {v["tag"] for v in client.get("/api/verdicts").json()["verdicts"]}
+        if "es" in rows:
+            break
+        time.sleep(0.05)
+
+    started = client.post("/api/batches", json=scan(client, tags=["pt", "pt-br"]))
+    snap = settle(client, started.json()["id"])
+    out = client.post(f"/api/batches/{snap['id']}/approve").json()
+    assert "es" not in out["tags"]
+
+
+# -- the dialect plan ----------------------------------------------------------
+#
+# A capability scan walks classes; a dialect battery walks *varieties*, each
+# against its family's reference. These pin the rules that turn a locale list
+# into that queue — and every one of them is a refusal the engine would raise
+# at the call, applied in the plan so a scan of six hundred tags is not six
+# hundred ways to discover something knowable for free.
+
+def dialect_scan(client, **over) -> dict:
+    body = {"engine": "acme-a", "tags": ["pt", "pt-br", "pt-pt"],
+            "test_type": "dialect", "attestors": ["other-b"]}
+    body.update(over)
+    return body
+
+
+def test_a_dialect_scan_walks_varieties_against_the_reference(client):
+    plan = client.post("/api/batches/preflight",
+                       json=dialect_scan(client)).json()
+    assert plan["unit"] == "variety"
+    by_tag = {i["representative"]: i for i in plan["items"]}
+    assert by_tag["pt-br"]["contrast"] == "pt-pt", \
+        "the variety is held against its family's reference"
+    assert by_tag["pt-br"]["reference_basis"] == "recorded", \
+        "pt/PT is written down like every other family, not derived"
+    assert by_tag["pt-br"]["skip_reason"] is None
+    assert by_tag["pt"]["skip_reason"] == "umbrella", \
+        "the umbrella is the conversion source, never a contrast arm"
+    assert by_tag["pt-pt"]["skip_reason"] == "is-reference", \
+        "nothing is measured against itself"
+    assert plan["to_scan"] == 1
+    assert plan["inheriting_tags"] == 0, \
+        "whether a model marks *this* variety cannot be inherited"
+
+
+def test_a_dialect_scan_will_not_run_without_a_panel(client):
+    """A dialect battery has no judge: the panel of control models is its
+    whole instrument, so an empty one is not a scan with a default."""
     r = client.post("/api/batches/preflight",
-                    json=scan(client, test_type="dialect"))
+                    json=dialect_scan(client, attestors=[]))
     assert r.status_code == 400
-    assert "contrast pair" in r.json()["detail"]
+    assert "control models" in r.json()["detail"]
+
+
+def test_a_panel_of_the_engines_own_family_is_refused(client):
+    r = client.post("/api/batches/preflight",
+                    json=dialect_scan(client, attestors=["acme-b"]))
+    assert r.status_code == 400
+    assert "own family" in r.json()["detail"]
+
+
+def test_an_unconfirmed_reference_is_not_scanned_unless_it_is_asked_for(client):
+    """Afrikaans has a written baseline (`af-ZA`) that nobody has confirmed.
+    Measuring against it is runnable and it is a claim nobody has stood behind
+    — so it is a deliberate gesture, not a default."""
+    body = dialect_scan(client, tags=["af-na", "af-za"])
+    plan = client.post("/api/batches/preflight", json=body).json()
+    assert plan["to_scan"] == 0
+    assert plan["skipped"]["unconfirmed-reference"] == 1
+
+    asked = client.post("/api/batches/preflight",
+                        json={**body, "include_unconfirmed": True}).json()
+    assert asked["to_scan"] == 1
+    assert asked["unconfirmed"] == ["af-na"], \
+        "named rather than counted: a reader has to see which"
+
+
+def test_a_dialect_scan_measures_the_variety_and_nothing_inherits(dialect_client):
+    c = dialect_client
+    started = c.post("/api/batches", json=dialect_scan(c))
+    assert started.status_code == 201, started.text
+    snap = settle(c, started.json()["id"])
+    assert snap["status"] == "done", snap
+
+    item = next(i for i in snap["items"] if i["representative"] == "pt-br")
+    assert item["contrast"] == "pt-pt", "the pair is on the row, not re-derived"
+    assert item["run_id"], "the item opens on the run that produced it"
+
+    rows = {v["tag"]: v for v in c.get("/api/verdicts").json()["verdicts"]}
+    assert rows["pt-br"]["test_type"] == "dialect"
+    assert rows["pt-br"]["approved"] is False, "a scan never signs off on itself"
+    assert "pt-pt" not in rows and "pt" not in rows, \
+        "a dialect claim is about one variety; there is nothing to inherit it"
 
 
 # -- the budget ----------------------------------------------------------------

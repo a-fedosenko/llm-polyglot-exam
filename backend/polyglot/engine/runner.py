@@ -499,23 +499,49 @@ def _spent(sess: Session) -> dict:
     return out
 
 
+def _comparable(sess: Session, outcome: dict) -> bool:
+    """Whether this run may be written to the verdict table at all.
+
+    A run whose prompts or scenarios were rewritten measured a different
+    instrument, and results are only comparable within one; a run whose reader
+    was overruled measured an instrument the method did not certify. Both are
+    kept in full — the corpus has every text — and neither becomes a standing
+    verdict. One definition, because an adjudicated row that slipped past a
+    guard the measured row obeys would be a way to promote a run the table is
+    not allowed to hold.
+    """
+    return (not sess.prompt_edited and not outcome.get("incomplete")
+            and not outcome.get("instrument_overridden"))
+
+
 def _finish(sess: Session) -> None:
     if sess.status != "running":
         return
     sess.status = "done"
     outcome = sess.machine.outcome()  # type: ignore[attr-defined]
+    # A correction made mid-run was scored against a half-finished run. Re-done
+    # here from the whole of it, because the alternative is a panel reporting a
+    # pair of numbers that were true for a few seconds in the middle.
+    if sess.overrides:
+        try:
+            sess.adjudication = {
+                **sess.machine.adjudicate(sess.overrides),  # type: ignore[attr-defined]
+                "overrides": sess.overrides}
+        except ValueError:
+            # The corrections no longer fit the run they were made against —
+            # a re-run can drop the item they named. Left as they were rather
+            # than failing the run; the page shows what it has.
+            pass
     _close(sess)
     with session() as s:
         repo.finish_run(s, sess.id, status="done", outcome=outcome,
                         calls=_spent(sess), prompt_edited=sess.prompt_edited,
-                        backtranslator=outcome.get("backtranslator"))
-        # A run whose prompts or scenarios were rewritten measured a different
-        # instrument, and results are only comparable within one. It is kept in
-        # full — the corpus has every text — and it is never promoted to a
-        # standing verdict.
-        if (not sess.prompt_edited and not outcome.get("incomplete")
-                and not outcome.get("instrument_overridden")):
+                        backtranslator=outcome.get("backtranslator"),
+                        adjudication=sess.adjudication)
+        if _comparable(sess, outcome):
             repo.put_verdict(s, _verdict_row(sess, outcome), promote=None)
+            if sess.adjudication:
+                _record_adjudicated(s, sess, outcome, sess.adjudication)
 
 
 def _verdict_row(sess: Session, outcome: dict) -> dict:
@@ -546,6 +572,56 @@ def _verdict_row(sess: Session, outcome: dict) -> dict:
     }
 
 
+def _adjudicated_row(sess: Session, outcome: dict, result: dict) -> dict:
+    """The corrected reading, in the same shape as the measured one.
+
+    Built from `_verdict_row` and then patched, rather than assembled
+    separately: two rows that sit side by side in the same table, inviting the
+    same comparison, have to have been built by the same code — the project's
+    own conventions record what a re-implemented scoring path costs.
+    """
+    row = _verdict_row(sess, outcome)
+    adj = result.get("adjudicated") or {}
+    if outcome["test_type"] == "capability":
+        ci = adj.get("ci") or [None, None]
+        row.update({
+            "level": adj.get("tier", row["level"]),
+            "evidence": adj.get("evidence", row["evidence"]),
+            "s_lang": adj.get("s_lang"), "s_content": adj.get("s_content"),
+            "ci_low": ci[0], "ci_high": ci[1],
+            "borderline": bool(adj.get("borderline")),
+            "confidence": "low" if adj.get("borderline") else "high",
+            "refusals": int(adj.get("refusals") or 0),
+            "notes": list(adj.get("notes") or []),
+        })
+    else:
+        row.update({"level": adj.get("verdict", row["level"]),
+                    "confidence": adj.get("confidence", row["confidence"])})
+    row["adjudicated"] = list(result.get("applied") or [])
+    row["detail"] = {**(row.get("detail") or {}),
+                     "adjudication": {"measured_level": outcome["level"],
+                                      "note": result.get("note")}}
+    return row
+
+
+def _record_adjudicated(s, sess: Session, outcome: dict, result: dict) -> int | None:
+    """Put the corrected reading on record, and make it the standing answer.
+
+    The person correcting the judge is the instrument here: they can read the
+    text and see that the fact is in it. So the correction counts immediately,
+    and what keeps it honest is not a confirmation step but the fact that the
+    judge's row is never touched — it sits beside this one and is one click
+    from being the answer again.
+
+    Putting every fact back to what the judge said removes the corrected row
+    altogether, rather than storing a correction that corrects nothing.
+    """
+    if not result.get("applied"):
+        repo.clear_adjudicated_verdict(s, sess.id)
+        return None
+    return repo.put_adjudicated_verdict(s, _adjudicated_row(sess, outcome, result))
+
+
 def _override_key(o: dict) -> tuple:
     """What two corrections have to share to be the same correction."""
     if "spec_id" in o:
@@ -571,6 +647,14 @@ def adjudicate(sess: Session, overrides: list[dict]) -> dict:
     sess.adjudication = result
     with session() as s:
         repo.finish_run(s, sess.id, adjudication=result)
+        # Only once the run is finished is there a whole run to re-score. A
+        # correction made mid-run is kept and applied again at the end, by
+        # `_finish`, rather than recorded against a partial measurement.
+        if sess.status == "done":
+            outcome = sess.machine.outcome()  # type: ignore[attr-defined]
+            if _comparable(sess, outcome):
+                vid = _record_adjudicated(s, sess, outcome, result)
+                result = {**result, "verdict_id": vid}
     return result
 
 

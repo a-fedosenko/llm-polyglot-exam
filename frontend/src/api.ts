@@ -11,8 +11,15 @@ export interface ScanRequest {
   tags: string[];
   test_type?: string;
   rescan?: string;
+  /** The capability instrument. A dialect battery has neither — its instrument
+   *  is the control panel below, re-qualified on every single run. */
   judge_model?: string | null;
   backtranslator_panel?: string[];
+  attestors?: string[];
+  /** Varieties whose family baseline nobody has confirmed are left out unless
+   *  this is set: measuring against an unconfirmed baseline in bulk would turn
+   *  an open question into a table of claims. */
+  include_unconfirmed?: boolean;
   max_calls?: number | null;
 }
 
@@ -142,4 +149,10 @@ export const api = {
     `/batches${engine ? `?engine=${encodeURIComponent(engine)}` : ""}`),
   pauseScan: (id: string) =>
     post<{ ok: boolean; batch: BatchSnapshot }>(`/batches/${id}/pause`),
+  /** Sign off on everything one scan wrote, in one gesture. Still a person
+   *  approving — the scan never approves its own output — and as reversible as
+   *  the single-row button, with `approved=false`. */
+  approveScan: (id: string, approved = true) =>
+    post<{ changed: number; tags: string[]; batch: BatchSnapshot }>(
+      `/batches/${id}/approve?approved=${approved}`),
 };
