@@ -237,3 +237,51 @@ def test_an_abstaining_language_check_keeps_the_text(scheme):
                     GateVerdict.DEGENERATE):
         assert GateResult(verdict).abstained is False, \
             f"{verdict} is a real negative and must still void the generation"
+
+
+# -- a reply that ran out of budget --------------------------------------------
+
+def test_a_truncated_reply_keeps_its_verdict_and_loses_only_citations():
+    """An unreadable control reply disqualifies an attestor for a whole family.
+
+    The verdict is the first thing in the object and the citations are the
+    tail, so a reply cut off mid-citation still contains the answer. Throwing
+    it away published a failure of the instrument's token budget as a failure
+    of the model — the one mistake this project refuses to make.
+    """
+    from polyglot.core.probe.attest import _parse
+
+    cut = ('{"a": "Serbia", "b": "Montenegro", "markers": ['
+           '{"text": "Dete", "in": "A", "why": "Ekavian reflex"}, '
+           '{"text": "mleko", "in": "A", "why": "Ekavian ref')
+    data, err, repaired = _parse(cut)
+    assert err is None and repaired is True
+    assert data["a"] == "Serbia" and data["b"] == "Montenegro"
+    assert len(data["markers"]) == 2, "the partial citation is dropped, not kept"
+    assert "why" not in data["markers"][1]
+
+
+def test_repair_only_ever_drops_content():
+    from polyglot.core.probe.attest import _parse
+
+    for cut, kept in (('{"a": "Serbia", "b": "Mont', {"a": "Serbia"}),
+                      ('{"a": "Serbia", "b": "Montenegro", "mar',
+                       {"a": "Serbia", "b": "Montenegro"})):
+        data, err, repaired = _parse(cut)
+        assert err is None and repaired is True
+        assert data == kept, "a repair may shorten a reply, never alter it"
+
+
+def test_an_intact_reply_is_not_marked_repaired():
+    from polyglot.core.probe.attest import _parse
+
+    data, err, repaired = _parse('{"a": "Serbia", "b": "Montenegro", "markers": []}')
+    assert err is None and repaired is False
+
+
+def test_prose_is_still_unparseable():
+    """Repair must not turn a refusal into an answer."""
+    from polyglot.core.probe.attest import _parse
+
+    data, err, _ = _parse("I am not able to judge this.")
+    assert data is None and "no JSON object" in err

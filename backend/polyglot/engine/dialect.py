@@ -498,6 +498,14 @@ class DialectMachine:
                         label=f"{src}->{dst}")],
             context={"source": src, "target": dst})
 
+    #: An attestor cites one marker per difference it finds, each with its own
+    #: explanation, so the reply grows with how much the text gives it to talk
+    #: about. The denser scenarios in `data/specs/dialect.json` pushed past the
+    #: old 500/600 and replies started arriving cut off mid-citation — which
+    #: `_parse` repairs, but a budget that relies on the repair is a budget
+    #: that silently loses evidence on every run.
+    ATTEST_TOKENS = 1500
+
     def _plan_controls(self, st: State, attestor: str) -> Planned:
         first, second = self._pair(st)
         assert first and second
@@ -513,13 +521,13 @@ class DialectMachine:
             editable=False,
             calls=[
                 Call(role="control", model=attestor, system=id_sys, user=id_user,
-                     max_tokens=600, label="identity control"),
+                     max_tokens=self.ATTEST_TOKENS, label="identity control"),
                 Call(role="control", model=attestor, system=id_sys,
                      user=attest.separate_prompt(first, second, self.blind)[1],
-                     max_tokens=600, label="order control (A then B)"),
+                     max_tokens=self.ATTEST_TOKENS, label="order control (A then B)"),
                 Call(role="control", model=attestor, system=id_sys,
                      user=attest.separate_prompt(second, first, self.blind)[1],
-                     max_tokens=600, label="order control (B then A)"),
+                     max_tokens=self.ATTEST_TOKENS, label="order control (B then A)"),
             ],
             context={"attestor": attestor})
 
@@ -531,7 +539,7 @@ class DialectMachine:
             title=HELP["identify"][0], explains=HELP["identify"][1],
             summary=f"Ask {attestor} to name the variety, unlabelled",
             calls=[Call(role="attest", model=attestor, system=system, user=user,
-                        max_tokens=500, label=f"identify · {attestor}")],
+                        max_tokens=self.ATTEST_TOKENS, label=f"identify · {attestor}")],
             context={"attestor": attestor})
 
     def _plan_separate(self, st: State, attestor: str) -> Planned:
@@ -550,7 +558,7 @@ class DialectMachine:
             title=HELP["separate"][0], explains=HELP["separate"][1],
             summary=f"Ask {attestor} to tell the pair apart",
             calls=[Call(role="attest", model=attestor, system=system, user=user,
-                        max_tokens=600, label=f"contrast · {attestor}")],
+                        max_tokens=self.ATTEST_TOKENS, label=f"contrast · {attestor}")],
             context={"attestor": attestor})
 
     def _free(self, kind: str, phase: str, summary: str,

@@ -141,6 +141,10 @@ def identity_control(client: OpenAICompatClient, attestor: str, *, text: str,
                         sep.raw, sep.error,
                         meta={"a": sep.a, "b": sep.b, "split": sep.split}))
     if sep.error:
+        # An unreadable reply disqualifies the attestor for the whole family,
+        # so the detail has to say whether that is a fact about the model or
+        # about this instrument's token budget. `_parse` repairs what it can;
+        # what reaches here was beyond repair.
         return ControlResult(ControlKind.IDENTITY, False,
                              f"no usable answer: {sep.error}", sep.raw)
     if sep.split:

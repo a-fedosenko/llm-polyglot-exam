@@ -14,6 +14,14 @@ from polyglot.paths import ROOT
 #: one -- a changed prompt, a moved threshold, a different gate rule. It is part
 #: of a verdict's identity, so a bump does not destroy anything: it makes every
 #: stored verdict *stale* rather than wrong, and the UI says so.
+#: 6.3.0 — attestor replies get 1500 tokens, and a reply cut off mid-citation
+#: is repaired back to its last complete value rather than discarded. An
+#: attestor cites one marker per difference with its own explanation, so the
+#: denser scenarios made the replies longer than the old 500/600 budget; the
+#: verdict is the first thing in the object and survived, while the parse that
+#: threw the whole reply away disqualified the model for the family. Repaired
+#: replies are marked, because their marker lists are partial.
+#:
 #: 6.2.0 — an abstaining language check no longer voids a dialect generation.
 #: A pluricentric family's siblings are precisely the codes LID cannot
 #: separate — `sr-ME-Latn` abstains on bos, cnr, hbs and hrv — so whenever the
@@ -52,7 +60,7 @@ from polyglot.paths import ROOT
 #: and absorbing P4; a battery whose two arms come back identical stops free;
 #: a silent panel reports `indeterminate` rather than `no-evidence`; and
 #: confidence counts votes rather than panel members.
-METHOD_VERSION = "6.2.0"
+METHOD_VERSION = "6.3.0"
 
 
 class Settings(BaseSettings):

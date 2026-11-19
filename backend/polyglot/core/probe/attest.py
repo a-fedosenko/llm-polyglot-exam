@@ -145,6 +145,11 @@ class Identification:
     #: Markers the attestor cited that are **not** in the text it was shown.
     #: Filled by `ground`, not by the model.
     fabricated: list[str] = field(default_factory=list)
+    #: The reply was cut off — or otherwise malformed — and was repaired back
+    #: to its last complete value. The verdict survives, because it is the
+    #: first thing in the object, but the marker list is shorter than what the
+    #: model cited and a reader must not take it as the whole of the evidence.
+    truncated: bool = False
 
     @property
     def ok(self) -> bool:
@@ -174,21 +179,100 @@ class Identification:
         # the step that produced it.
         return {"answer": self.answer, "confidence": self.confidence,
                 "markers": self.markers, "fabricated": self.fabricated,
+                "truncated": self.truncated,
                 "raw": self.raw, "error": self.error}
 
 
-def _parse(raw: str) -> tuple[dict | None, str | None]:
-    """The first JSON object in a response, or a reason there is none."""
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        return None, "no JSON object in the response"
+def _close_truncated(raw: str) -> str | None:
+    """Cut a truncated JSON object back to its last complete value and close it.
+
+    The answer is always the *first* thing in these replies — `answer`, or `a`
+    and `b` — and what runs out of budget is the tail of the `markers` array.
+    So a reply cut off mid-citation still contains the verdict, and throwing it
+    away loses the measurement to keep a list of evidence that was only ever
+    supporting.
+
+    Returns `None` when there is no complete value to cut back to, rather than
+    inventing a shape. What comes back has fewer markers than the model cited,
+    never different ones.
+    """
+    stack: list[str] = []
+    in_string = escape = False
+    # (index to cut at, the containers open at that point)
+    safe: tuple[int, tuple[str, ...]] | None = None
+
+    for i, ch in enumerate(raw):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+                # Deliberately *not* a safe point. A closed string may be a
+                # key — `"why"` with its value cut off — and cutting after it
+                # yields `{"why"}`, which is not JSON. Only a comma or a closed
+                # container proves a value completed.
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if not stack or stack[-1] != ch:
+                return None
+            stack.pop()
+            if stack:
+                safe = (i + 1, tuple(stack))
+        elif ch == "," and stack:
+            safe = (i, tuple(stack))
+
+    if safe is None:
+        return None
+    cut, open_at = safe
+    return raw[:cut] + "".join(reversed(open_at))
+
+
+def _parse(raw: str) -> tuple[dict | None, str | None, bool]:
+    """The first JSON object in a response, or a reason there is none.
+
+    The third value says the object was *repaired* back to its last complete
+    value, so a caller can mark its marker list partial.
+
+    Repairing rather than rejecting is this project's own rule applied to its
+    own limit. A reply that ran out of tokens is a failure of the budget, and
+    an unparseable control reply disqualifies an attestor for a whole family —
+    so rejecting it publishes a failure of the instrument as a failure of the
+    thing being measured, which is the one mistake this project refuses to
+    make. A repair can only *drop* content, never alter it: what comes back is
+    a prefix of what the model actually said.
+    """
+    if "{" not in raw:
+        return None, "no JSON object in the response", False
+
+    # The greedy match finds a closing brace, but on a truncated reply that
+    # brace belongs to a nested object — the first marker's — and the match is
+    # unparseable. So a failure here falls through to the repair rather than
+    # ending the attempt.
+    if m := re.search(r"\{.*\}", raw, re.S):
+        try:
+            data = json.loads(m.group(0))
+            if not isinstance(data, dict):
+                return None, "JSON was not an object", False
+            return data, None, False
+        except json.JSONDecodeError:
+            pass
+
+    repaired = _close_truncated(raw[raw.index("{"):])
+    if repaired is None:
+        return None, "the reply was cut off before any complete value", True
     try:
-        data = json.loads(m.group(0))
+        data = json.loads(repaired)
     except json.JSONDecodeError as e:
-        return None, f"unparseable JSON: {e}"
+        return None, f"unparseable JSON: {e}", True
     if not isinstance(data, dict):
-        return None, "JSON was not an object"
-    return data, None
+        return None, "JSON was not an object", True
+    return data, None, True
 
 
 def _markers(data: dict) -> list[dict]:
@@ -255,7 +339,7 @@ def identify(client: OpenAICompatClient, model: str, *, text: str,
     if not completion.ok:
         return Identification(None, error=completion.error, raw=completion.text)
 
-    data, err = _parse(completion.text or "")
+    data, err, repaired = _parse(completion.text or "")
     if data is None:
         return Identification(None, raw=completion.text, error=err)
 
@@ -271,7 +355,7 @@ def identify(client: OpenAICompatClient, model: str, *, text: str,
                               confidence=str(data.get("confidence") or "") or None,
                               error=f"answer {answer!r} is not one of the options")
 
-    ident = Identification(match, markers=_markers(data),
+    ident = Identification(match, markers=_markers(data), truncated=repaired,
                            confidence=str(data.get("confidence") or "") or None,
                            raw=completion.text)
     return ground(ident, text)
@@ -333,6 +417,9 @@ class Separation:
     raw: str | None = None
     error: str | None = None
     fabricated: list[str] = field(default_factory=list)
+    #: As `Identification.truncated`: the reply was repaired from a cut-off
+    #: one, so the citations below it are partial.
+    truncated: bool = False
     #: Whether the texts were shown in the order the caller passed them. The
     #: caller needs this to score the answer, and nothing in the prompt reveals
     #: it.
@@ -361,8 +448,8 @@ class Separation:
     def as_dict(self) -> dict:
         return {"a": self.a, "b": self.b, "swapped": self.swapped,
                 "confidence": self.confidence, "markers": self.markers,
-                "fabricated": self.fabricated, "raw": self.raw,
-                "error": self.error}
+                "fabricated": self.fabricated, "truncated": self.truncated,
+                "raw": self.raw, "error": self.error}
 
 
 def separate_prompt(a: str, b: str, blind: Blind) -> tuple[str, str]:
@@ -414,7 +501,7 @@ def separate(client: OpenAICompatClient, model: str, *, first: str, second: str,
         return Separation(None, None, error=completion.error, raw=completion.text,
                           swapped=swap)
 
-    data, err = _parse(completion.text or "")
+    data, err, repaired = _parse(completion.text or "")
     if data is None:
         return Separation(None, None, raw=completion.text, error=err, swapped=swap)
 
@@ -425,7 +512,7 @@ def separate(client: OpenAICompatClient, model: str, *, first: str, second: str,
         return next((o for o in allowed if o.casefold() == want.casefold()), None)
 
     got_a, got_b = pick("a"), pick("b")
-    out = Separation(got_a, got_b, markers=_markers(data),
+    out = Separation(got_a, got_b, markers=_markers(data), truncated=repaired,
                      confidence=str(data.get("confidence") or "") or None,
                      raw=completion.text, swapped=swap)
     if got_a is None or got_b is None:

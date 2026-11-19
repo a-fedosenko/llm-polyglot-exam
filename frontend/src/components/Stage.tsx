@@ -840,10 +840,10 @@ function ControlsStep({ r }: any) {
   );
 }
 
-function Markers({ markers, fabricated }: any) {
+function Markers({ markers, fabricated, truncated }: any) {
   if (!markers?.length) return null;
   return (
-    <Section title="Markers it cited"
+    <Section title={truncated ? "Markers it cited (partial)" : "Markers it cited"}
              info="Every quotation is checked against the text it was cited for. A single invented marker means the verdict was not read off the text, which is the whole claim it was making.">
       <ul className="divide-y divide-line rounded-md border border-line">
         {markers.map((m: any, i: number) => {
@@ -859,6 +859,14 @@ function Markers({ markers, fabricated }: any) {
           );
         })}
       </ul>
+      {truncated && (
+        <p className="mt-2 text-[11.5px] leading-relaxed text-warn">
+          The reply ran out of tokens and was repaired back to its last
+          complete value. The answer itself survived — it is the first thing
+          the model writes — but this list is shorter than what it cited, so
+          read it as some of the evidence rather than all of it.
+        </p>
+      )}
     </Section>
   );
 }
@@ -893,7 +901,8 @@ function IdentifyStep({ r, onOverride }: any) {
           )}
         </div>
       </Section>
-      <Markers markers={r.markers} fabricated={r.fabricated} />
+      <Markers markers={r.markers} fabricated={r.fabricated}
+               truncated={r.truncated} />
       <Replied raw={r.raw} />
     </>
   );
@@ -930,7 +939,8 @@ function SeparateStep({ r, onOverride }: any) {
           )}
         </div>
       </Section>
-      <Markers markers={r.markers} fabricated={r.fabricated} />
+      <Markers markers={r.markers} fabricated={r.fabricated}
+               truncated={r.truncated} />
       <Replied raw={r.raw} />
     </>
   );
