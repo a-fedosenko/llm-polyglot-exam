@@ -160,6 +160,47 @@ def test_a_recorded_reference_is_found_by_region_not_by_tag_spelling(scheme):
         "one region, resolved separately in each script class"
 
 
+def test_the_shipped_list_does_not_contradict_itself(scheme):
+    """A row whose class key and ISO code disagree is a phantom language.
+
+    `zh-sg` was filed under `zh|Hans` while every other Simplified row was
+    `zho|Hans`, so Singapore and Macao formed a two-member family with no
+    baseline and Chinese was measured twice; `de-be` carried the code for Ewe,
+    which would have convicted perfect German of being the wrong language. Both
+    were invisible until somebody read the rows side by side. `polyglot scheme`
+    is the command that reads them; this is the same check, in CI.
+    """
+    own_codes = {l.iso639_3 for l in scheme.languages.values() if l.iso639_3}
+    contains: dict[str, set[str]] = {}
+    for l in scheme.languages.values():
+        if l.members and l.iso639_3:
+            contains.setdefault(l.iso639_3, set()).update(l.members)
+
+    wrong = []
+    for tag, l in scheme.languages.items():
+        if not l.iso639_3:
+            continue
+        primary = l.cls.partition("|")[0]
+        filed = (primary == l.iso639_3 or primary == l.macro
+                 or l.iso639_3 in contains.get(primary, ()))
+        # A class key naming a code the list has no row for is a macrolanguage
+        # grouping (`zza` over `diq`) and cannot be checked from inside.
+        if not filed and primary in own_codes:
+            wrong.append((tag, l.cls, l.iso639_3))
+    assert not wrong, wrong
+
+    # `scope`, `type` and `members` describe the code, so rows of one code have
+    # to agree about it — or the gate accepts different answers for two rows of
+    # one language.
+    shapes: dict[str, set] = {}
+    for l in scheme.languages.values():
+        if l.iso639_3:
+            shapes.setdefault(l.iso639_3, set()).add(
+                (l.scope, len(l.members or [])))
+    split = {code: s for code, s in shapes.items() if len(s) > 1}
+    assert not split, split
+
+
 def test_every_family_in_the_shipped_list_is_written_down(scheme):
     """The file used to hold only the exceptions, and a family nobody had
     thought about was therefore invisible — Catalan sat on `ca-AD` by
@@ -184,13 +225,35 @@ def test_a_region_that_matches_two_members_falls_through_to_a_tag(scheme):
     assert r.tag == "az-az-latn" and r.basis == "recorded"
 
 
-def test_a_written_but_unconfirmed_reference_is_not_a_decision(scheme):
+def test_a_written_but_unconfirmed_reference_is_not_a_decision(scheme, monkeypatch):
     """`reviewed: false` is a claim with a reason attached and nobody behind
-    it. It must not read as settled, and a scan must not take it by default."""
+    it. It must not read as settled, and a scan must not take it by default.
+
+    The overlay is supplied here rather than read from the shipped file: what
+    is pinned is the rule, and the file's review state is the operator's to
+    move."""
+    monkeypatch.setattr(ref, "_overlay", lambda: {
+        "afr|Latn": {"baseline": "af-ZA", "why": "proposed", "reviewed": False}})
     r = ref.reference_for(scheme, "afr|Latn")
-    assert r.tag == "af-za", "the proposal, not the alphabetical accident"
+    assert r.tag == "af-za", "resolved by meaning, not by spelling"
     assert r.basis == "proposed"
     assert r.decided is False, "a proposal must never read as a decision"
+
+    monkeypatch.setattr(ref, "_overlay", lambda: {
+        "afr|Latn": {"baseline": "af-ZA", "why": "confirmed", "reviewed": True}})
+    assert ref.reference_for(scheme, "afr|Latn").basis == "recorded"
+
+
+def test_a_baseline_from_another_family_is_not_a_baseline(scheme, monkeypatch):
+    """A tag from outside the class is a typo, not a decision. Resolving it
+    would hold Portuguese against English and report a confirmed reference
+    while doing it."""
+    monkeypatch.setattr(ref, "_overlay", lambda: {
+        "por|Latn": {"baseline": "en-GB", "why": "typo", "reviewed": True}})
+    r = ref.reference_for(scheme, "por|Latn")
+    assert r.tag != "en-gb"
+    assert r.basis in ("rule", "provisional"), \
+        "an unresolvable entry falls through rather than crossing families"
 
 
 def test_a_family_with_no_entry_falls_back_and_says_it_is_standing_in(scheme,

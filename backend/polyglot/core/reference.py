@@ -180,7 +180,13 @@ def _resolve(scheme: Scheme, cls: str, baseline: str) -> Language | None:
     """
     exact = scheme.get(baseline)
     if exact is not None:
-        return exact
+        # **Within the class, always.** A baseline is a statement about which
+        # variety of *this* family the others are held against, so a tag from
+        # somewhere else is a typo and not a decision — and resolving it would
+        # contrast Portuguese against English while reporting a confirmed
+        # reference. Falling through makes it unresolvable, which is what
+        # `polyglot references --check` reports.
+        return exact if exact.cls == cls else None
     primary, region, script = _subtags(baseline)
     hits = [l for l in _members(scheme, cls)
             if l.lang.lower() == primary

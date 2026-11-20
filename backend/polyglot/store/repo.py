@@ -195,12 +195,19 @@ def put_adjudicated_verdict(s: Session, data: dict) -> int:
         promote_verdict(s, row.id)
         s.flush()
         return row.id
+    was_approved = existing.approved
     for k, v in data.items():
         setattr(existing, k, v)
     # A re-correction is a new reading of the same run: it loses the sign-off,
-    # because nobody has read *this* one yet.
+    # because nobody has read *this* one yet. Said on the row rather than done
+    # quietly — an approval that disappears with no explanation is the kind of
+    # thing that makes an operator stop trusting the table.
     existing.approved, existing.approved_at = False, None
     existing.measured_at = _now()
+    if was_approved:
+        existing.notes = list(existing.notes or []) + [
+            "Approval withdrawn: this reading was corrected again after it had "
+            "been signed off."]
     promote_verdict(s, existing.id)
     s.flush()
     return existing.id

@@ -229,10 +229,16 @@ def test_a_panel_of_the_engines_own_family_is_refused(client):
     assert "own family" in r.json()["detail"]
 
 
-def test_an_unconfirmed_reference_is_not_scanned_unless_it_is_asked_for(client):
-    """Afrikaans has a written baseline (`af-ZA`) that nobody has confirmed.
-    Measuring against it is runnable and it is a claim nobody has stood behind
-    — so it is a deliberate gesture, not a default."""
+def test_an_unconfirmed_reference_is_not_scanned_unless_it_is_asked_for(
+        client, monkeypatch):
+    """A baseline nobody has confirmed is runnable and is a claim nobody has
+    stood behind — so scanning against it is a deliberate gesture, not a
+    default. The overlay is supplied here: the rule is what is pinned, and
+    which families are confirmed is the operator's to move."""
+    from polyglot.core import reference
+
+    monkeypatch.setattr(reference, "_overlay", lambda: {
+        "afr|Latn": {"baseline": "af-ZA", "why": "proposed", "reviewed": False}})
     body = dialect_scan(client, tags=["af-na", "af-za"])
     plan = client.post("/api/batches/preflight", json=body).json()
     assert plan["to_scan"] == 0

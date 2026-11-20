@@ -38,11 +38,6 @@ export interface Instrument {
   fallback: string;
   /** The dialect panel: one to three control models. */
   attestors: string[];
-  /** Whether varieties whose family baseline nobody has confirmed are
-   *  scanned. Off by default — measuring hundreds of varieties against
-   *  baselines nobody has stood behind would turn an open question into a
-   *  table of claims. */
-  includeUnconfirmed: boolean;
   rescan: Rescan;
   maxCalls: number | null;
 }
@@ -367,31 +362,6 @@ export function ScanBar({ scope, onScope, instrument, onInstrument, rows,
               </div>
             </Field>
 
-            <Field label="Unconfirmed baselines" wide
-                   info={<>
-                     Every contrastable family is written down in{" "}
-                     <span className="font-mono">references/reference-varieties.json</span>{" "}
-                     with the variety it is held against and the reason — the
-                     ones a rule could derive included, so the open questions
-                     are countable in one place.
-                     <br /><br />
-                     A family is <b>confirmed</b> when somebody set{" "}
-                     <span className="font-mono">reviewed: true</span> on it.
-                     Until then the entry is a <b>proposal</b>: a written claim
-                     with a reason and nobody behind it, which is not the same
-                     as a decision.
-                     <br /><br />
-                     Scanning those is runnable and it is not nothing — every
-                     verdict is relative to a baseline no one has stood behind.
-                     Left out by default, counted in the plan either way, and
-                     the varieties affected are named rather than tallied.
-                   </>}>
-              <Segment value={instrument.includeUnconfirmed ? "yes" : "no"}
-                       locked={!!locked}
-                       onChange={(v) => set({ includeUnconfirmed: v === "yes" })}
-                       options={[["no", "Confirmed baselines only"],
-                                 ["yes", "Include unconfirmed"]]} />
-            </Field>
           </>
         ) : (
           <>

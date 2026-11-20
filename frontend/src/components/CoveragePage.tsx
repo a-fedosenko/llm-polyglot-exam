@@ -16,7 +16,7 @@ const TIER_TONE: Record<string, string> = {
  *  over. */
 const BLANK_INSTRUMENT: Instrument = {
   engine: "", test: "capability", judge: "", reader: "", fallback: "",
-  attestors: [], includeUnconfirmed: false,
+  attestors: [],
   rescan: "drafts" as Rescan, maxCalls: null,
 };
 
@@ -187,8 +187,10 @@ export function CoveragePage({ onOpenRun }: { onOpenRun: (runId: string) => void
     rescan: instrument.rescan,
     max_calls: instrument.maxCalls,
     ...(dialect
-      ? { attestors: instrument.attestors,
-          include_unconfirmed: instrument.includeUnconfirmed }
+      // Every family in the shipped list is written down, so a scan takes
+      // them all; the plan still names any whose baseline nobody has
+      // confirmed, which is the part worth seeing before spending.
+      ? { attestors: instrument.attestors, include_unconfirmed: true }
       : { judge_model: instrument.judge,
           backtranslator_panel:
             [instrument.reader, instrument.fallback].filter(Boolean) }),
@@ -245,7 +247,7 @@ export function CoveragePage({ onOpenRun }: { onOpenRun: (runId: string) => void
   useEffect(() => { setPlan(null); }, [
     instrument.engine, instrument.test, instrument.rescan, instrument.maxCalls,
     instrument.reader, instrument.fallback, instrument.judge,
-    instrument.attestors.join(","), instrument.includeUnconfirmed,
+    instrument.attestors.join(","),
     scope.facet, scope.value, scope.query, picked.size,
   ]);
 

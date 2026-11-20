@@ -28,6 +28,11 @@ class Language(BaseModel):
     region_name: str | None = None
     name: str | None = None
     local_name: str | None = None
+    #: **A property of the CODE, not of this row.** Every `ar-*` row says
+    #: `macrolanguage` because `ara` is one — which is what lets the gate accept
+    #: `arz` as a resolution of a request for Arabic — and a row saying
+    #: otherwise than its siblings is a row the locale list half-resolved.
+    #: `polyglot scheme` is the command that finds those.
     scope: Scope = "individual"
     type: str | None = Field(None, description="ISO 639-3 type: L living, E extinct, H historical, A ancient, C constructed")
     macro: str | None = Field(None, description="ISO 639-3 code of the macrolanguage this belongs to")

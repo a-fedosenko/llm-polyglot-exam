@@ -79,6 +79,130 @@ def cmd_status(args) -> int:
     return 0
 
 
+#: The ISO 639-2/B codes and what they are in 639-3. Authored rather than
+#: derived: the list is twenty entries, fixed since 1998, and a locale list
+#: that resolved a row to the bibliographic half is a locale list whose rows
+#: can never match what a language identifier emits.
+BIBLIOGRAPHIC = {
+    "alb": "sqi", "arm": "hye", "baq": "eus", "bur": "mya", "chi": "zho",
+    "cze": "ces", "dut": "nld", "fre": "fra", "geo": "kat", "ger": "deu",
+    "gre": "ell", "ice": "isl", "mac": "mkd", "mao": "mri", "may": "msa",
+    "per": "fas", "rum": "ron", "slo": "slk", "tib": "bod", "wel": "cym",
+}
+
+
+def cmd_scheme(args) -> int:
+    """Audit a locale list for the contradictions that make phantom languages.
+
+    A locale list is generated, and a generator that half-resolves a row does
+    not announce it: the row simply carries a class key built from its own
+    subtag while its `iso639_3` says something else, and from then on the tool
+    treats one language as two — measuring it twice under capability, and
+    leaving its varieties with nobody to be contrasted against.
+
+    That is not hypothetical. `zh-mo-hans` and `zh-sg` were filed under
+    `zh|Hans` while every other Simplified row was `zho|Hans`, so Macao and
+    Singapore sat in a two-member family of their own with no defensible
+    baseline; and `zh` — the umbrella — carried neither the macrolanguage scope
+    nor the member list its own code has, so a Chinese generation that reads as
+    `cmn` counted as a substitution for the umbrella and as a resolution for
+    `zh-CN`. Both were invisible until somebody read the rows side by side.
+    """
+    from collections import defaultdict
+
+    from polyglot.core.scheme import load_scheme
+
+    scheme = load_scheme(args.scheme or settings.scheme)
+    rows = scheme.languages
+
+    #: What each macrolanguage code contains, taken from the list's own member
+    #: lists. Filing a variety under its macrolanguage's class is deliberate —
+    #: `arz` lives in `ara|Arab` — and this is how that is told apart from a
+    #: class key the generator simply got wrong.
+    contains: dict[str, set[str]] = {}
+    for l in rows.values():
+        if l.members and l.iso639_3:
+            contains.setdefault(l.iso639_3, set()).update(l.members)
+
+    def filed_correctly(l) -> bool:
+        primary = l.cls.partition("|")[0]
+        return (not l.iso639_3 or primary == l.iso639_3 or primary == l.macro
+                or l.iso639_3 in contains.get(primary, ()))
+
+    #: Codes carried by some row as its *own* code. A class key naming one of
+    #: these, on a row whose code is something else, is a contradiction inside
+    #: the list — German in Belgium filed under `deu|Latn` while its own code
+    #: says `ewe`. A class key naming a code the list has no row for is a
+    #: macrolanguage it does not carry (`zza` over `diq`), which is how the
+    #: generator groups varieties and is not checkable from here.
+    own_codes = {l.iso639_3 for l in rows.values() if l.iso639_3}
+
+    contradicts, bibliographic, unverifiable = [], [], []
+    for tag, l in rows.items():
+        if filed_correctly(l):
+            continue
+        primary = l.cls.partition("|")[0]
+        if BIBLIOGRAPHIC.get(l.iso639_3 or "") == primary:
+            bibliographic.append((tag, l.iso639_3, primary))
+        elif primary in own_codes:
+            contradicts.append((tag, l.cls, l.iso639_3))
+        else:
+            unverifiable.append((tag, l.cls, l.iso639_3))
+    wrong_class = contradicts + bibliographic
+
+    #: `scope`, `type` and `members` describe the CODE, not the row — every
+    #: `ar-*` row carries `ara`'s members because that is what lets the gate
+    #: accept `arz` as a resolution of a request for Arabic. Rows of one code
+    #: that disagree are rows the generator half-resolved, and the gate then
+    #: accepts different answers for two rows of one language.
+    by_code: dict[str, list] = defaultdict(list)
+    for tag, l in rows.items():
+        if l.iso639_3:
+            by_code[l.iso639_3].append((tag, l))
+    split = []
+    for code, group in sorted(by_code.items()):
+        shapes = {(l.scope, len(l.members or [])) for _, l in group}
+        if len(shapes) > 1:
+            split.append((code, sorted(shapes), [t for t, _ in group]))
+
+    #: A class with members but no umbrella is fine; two umbrellas is not.
+    umbrellas: dict[str, list[str]] = defaultdict(list)
+    for tag, l in rows.items():
+        if l.inclusive:
+            umbrellas[l.cls.partition("|")[0]].append(tag)
+    doubled = {k: v for k, v in umbrellas.items() if len(v) > 1}
+
+    unresolved = [tag for tag, l in rows.items() if l.iso639_3 is None]
+
+    for tag, cls, iso in contradicts:
+        print(f"!! {tag:14} is filed under {cls!r} while its own code says "
+              f"{iso!r} — the gate will expect {iso!r} from it, and every "
+              f"correct generation will be convicted of the wrong language")
+    for tag, iso, primary in bibliographic:
+        print(f"!! {tag:14} carries the ISO 639-2/B code {iso!r}; language "
+              f"identification emits {primary!r}, so every correct generation "
+              f"reads as the wrong language")
+    for tag, cls, iso in unverifiable:
+        print(f"-- {tag:14} is filed under {cls!r}, a code this list carries no "
+              f"row for — a macrolanguage grouping, not checkable from here")
+    for code, shapes, tags in split:
+        print(f"!! {code:6} rows disagree about the code: {shapes} — "
+              f"{', '.join(tags)}")
+    for code, tags in sorted(doubled.items()):
+        print(f"!! {code:6} has {len(tags)} umbrella rows: {', '.join(tags)}")
+    for tag in unresolved:
+        print(f"?? {tag:14} resolved to no ISO 639-3 code at all — it is a "
+              f"language of its own with nothing to compare it to")
+
+    print(f"{len(rows)} rows in {scheme.meta.name}: "
+          f"{len(contradicts)} contradicting their own class, "
+          f"{len(bibliographic)} on a bibliographic code, "
+          f"{len(split)} codes described inconsistently, "
+          f"{len(doubled)} doubled umbrellas, {len(unresolved)} unresolved")
+    bad = bool(wrong_class or split or doubled)
+    return 1 if args.check and bad else 0
+
+
 def cmd_references(args) -> int:
     """Every contrastable family, its baseline, and who stood behind it.
 
@@ -341,6 +465,13 @@ def main(argv: list[str] | None = None) -> int:
 
     st = sub.add_parser("status", help="what is measured, and what is stale")
     st.set_defaults(fn=cmd_status)
+
+    sc = sub.add_parser("scheme",
+                        help="audit a locale list for rows that contradict themselves")
+    sc.add_argument("--scheme", help="locale list to audit (default: configured)")
+    sc.add_argument("--check", action="store_true",
+                    help="exit non-zero if anything contradicts itself")
+    sc.set_defaults(fn=cmd_scheme)
 
     rf = sub.add_parser("references",
                         help="every dialect family's baseline, and who confirmed it")
